@@ -1,0 +1,20 @@
+[project]
+name = "ble-chassis-control"
+version = "0.1.0"
+description = "底盘上位机:HC-05 串口 / BLE 双链路,控制指令下发与数据回传显示"
+readme = "README.md"
+authors = [
+    { name = "applepine0", email = "mmygtxdt1@163.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "bleak>=3.0.2",
+    "pyserial>=3.5",
+]
+
+[project.scripts]
+ble-chassis-control = "ble_chassis_control:main"
+
+[build-system]
+requires = ["uv_build>=0.12.23,<0.13.0"]
+build-backend = "uv_build"
