@@ -39,8 +39,25 @@ class _FakeCanvas:
 
 
 class _FakeFrame:
+    """ttk 风格控件的桩。
+
+    ⚠️ 关键:ttk.Frame 等 styled widget **不支持 cget("background")**,
+    真实环境会抛 TclError: unknown option "-background"。
+    这里如实模拟该行为,以便捕获此类错误(曾因桩太宽松而漏掉)。
+    """
+
+    #: 允许 cget 的选项(ttk styled widget 的 background 不在其中)
+    _ALLOWED_CGET = ()
+
     def __init__(self, *a, **k):
-        pass
+        # 校验传入选项:若给 ttk 控件传了 background 也应报错(与真实一致)
+        for key in k:
+            if key in ("background", "bg"):
+                # tk.Label 允许;ttk 控件不允许 —— 由子类覆盖 _ALLOWED_CGET 决定
+                if "background" not in self._ALLOWED_CGET:
+                    raise TypeError(
+                        f"unknown option '-{key}' (ttk widget 不支持背景色)"
+                    )
 
     def columnconfigure(self, *a, **k):
         pass
@@ -51,18 +68,35 @@ class _FakeFrame:
     def grid(self, *a, **k):
         pass
 
-    def cget(self, *a):
+    def cget(self, key, *a):
+        key = str(key).lstrip("-")
+        if key not in self._ALLOWED_CGET:
+            raise RuntimeError(f"unknown option '-{key}'")
         return "#dddddd"
+
+
+class _FakeTkLabel(_FakeFrame):
+    """tk.Label 支持背景色。"""
+
+    _ALLOWED_CGET = ("background",)
+
+
+class _FakeTtkLabel(_FakeFrame):
+    """ttk.Label 不支持 background。"""
+
+    _ALLOWED_CGET = ()
 
 
 def _install_tk_stub() -> None:
     tk = types.ModuleType("tkinter")
     tk.Canvas = _FakeCanvas
-    tk.Label = _FakeFrame
+    tk.Label = _FakeTkLabel                      # tk.Label:支持 bg
     tk.StringVar = lambda **k: types.SimpleNamespace(get=lambda: "", set=lambda v: None)
     tk.BooleanVar = lambda **k: types.SimpleNamespace(get=lambda: True, set=lambda v: None)
     ttk = types.ModuleType("tkinter.ttk")
-    for name in ("Frame", "Label", "Checkbutton", "Button", "LabelFrame"):
+    ttk.Frame = _FakeFrame                       # ttk:不支持 bg
+    ttk.Label = _FakeTtkLabel
+    for name in ("Checkbutton", "Button", "LabelFrame"):
         setattr(ttk, name, _FakeFrame)
     tk.ttk = ttk
     sys.modules["tkinter"] = tk
@@ -153,6 +187,29 @@ def test_single_sample_no_crash() -> None:
     print("6) 单采样点不连线(容错): OK")
 
 
+def test_no_ttk_background_option() -> None:
+    """回归:不得对 ttk 控件使用 background/bg(真实环境抛 TclError)。
+
+    桩已如实模拟:ttk 控件传 bg → TypeError;cget('background') → RuntimeError。
+    """
+    ch = _load_chart()
+    # 构造过程若使用非法选项,会在此抛错
+    ch.WheelChart(None, names=NAMES, unit="rpm", maxlen=10)
+    # 直接验证桩行为确实会拦截(确保测试本身有效)
+    import tkinter as tk
+    try:
+        tk.Label(None, text="x", bg="#fff")          # tk.Label 允许
+    except TypeError:
+        raise AssertionError("tk.Label 应允许背景色")
+    try:
+        tk.ttk.Frame(None, background="#fff")        # ttk 不允许
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("桩未拦截 ttk 背景色,测试无效")
+    print("7) 回归:不使用 ttk 不支持的 background 选项: OK")
+
+
 if __name__ == "__main__":
     test_ring_buffer()
     test_partial_push()
@@ -160,4 +217,5 @@ if __name__ == "__main__":
     test_clear_and_empty_draw()
     test_zero_line_visible()
     test_single_sample_no_crash()
+    test_no_ttk_background_option()
     print("\nWheelChart 测试全部通过 ✓")

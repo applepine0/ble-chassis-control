@@ -71,8 +71,11 @@ class WheelChart(ttk.Frame):
         top = ttk.Frame(self)
         top.grid(row=0, column=0, sticky="ew", pady=(0, 2))
         for i, (name, color) in enumerate(zip(names, WHEEL_COLORS)):
-            tk.Label(top, text="■", fg=color, bg=self.cget("background") or None,
-                     font=("", 11)).grid(row=0, column=i, padx=(0, 1))
+            # 注意:ttk.Frame 不支持 cget("background")(styled widget),
+            # 故图例色块用 tk.Label,背景由父容器继承(不显式设置)。
+            tk.Label(top, text="■", fg=color, font=("", 11)).grid(
+                row=0, column=i, padx=(0, 1)
+            )
             ttk.Label(top, text=name).grid(row=0, column=i + 10, padx=(0, 8))
         ttk.Checkbutton(
             top, text="自动量程", variable=self._auto_scale,
