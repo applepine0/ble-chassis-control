@@ -3,7 +3,7 @@
 > 本文档面向**接手本项目的人或 AI 会话**。
 > 目标:读完本文 + `README.md` + `docs/API.md`,即可无缝继续开发,无需回溯历史对话。
 >
-> 最后更新:2025-10-24
+> 最后更新:2026-10-24
 
 ---
 
@@ -31,14 +31,16 @@
 | `frontend.py` GUI | ✅ | `tests/test_gui_flow.py`(8 路径) |
 | `backend.py` BLE 链路 | ⚠️ 代码完成但**本机模块不兼容** | 见第五节 |
 
+> ⚠️ 上表为历史验证结论。2026-10-24 复测发现混流、自动重连、`SET` 小数语义等问题,详见第十一节“已知问题”。
+
 ### ⏳ 待做(按优先级)
 
 | # | 事项 | 说明 |
 | :--- | :--- | :--- |
-| 1 | **MCU 端联调** | 把 `tools/mcu/chassis_protocol.c` 接入底盘固件,实现 `chassis_apply_velocity()`(舵轮逆解) |
+| 1 | **MCU 端联调** | 由底盘固件工程按本仓库协议文档实现;本仓库不提供 MCU 侧参考代码 |
 | 2 | **验证端到端** | 上位机发 VEL → MCU 逆解 → 舵轮动作 → 回传四轮 rpm → 曲线显示 |
 | 3 | **底盘能力限幅** | 目前只有 int16 钳位(±32.7 m/s),**无业务限幅**。建议加 `CHASSIS_MAX_V` / `CHASSIS_MAX_OMEGA` |
-| 4 | **git 提交** | 工作区有大量未提交改动(见第七节) |
+| 4 | **git 提交** | 提交本轮文档清理(见第七节) |
 | 5 | 可选:延迟测量 | 需要 MCU 回传时间戳(13B 帧方案) |
 | 6 | 可选:多链路并行 | 同时开 HC-06 控制 + USB-TTL 观察 |
 
@@ -195,7 +197,7 @@ uv sync                              # 安装依赖(bleak + pyserial)
 uv run ble-chassis-control           # 启动 GUI
 uv run python -m ble_chassis_control # 等价
 
-# --- 测试(全部应通过)---
+# --- 测试(本机:5 套全绿;motion 2 项见第十一节)---
 uv run python tests/test_smoke.py         # 协议/后端/GUI 冒烟
 uv run python tests/test_gui_flow.py      # GUI 8 条路径(含错误分支)
 uv run python tests/test_serial_backend.py # 串口后端 6 项(含只下发模式)
@@ -222,22 +224,28 @@ uv run python tools/bench_hc06.py COM15 115200             # 吞吐基准
 
 ---
 
-## 七、未提交改动(需 git commit)
+## 七、当前工作区改动(待提交)
 
-工作区有大量改动待提交(建议分 3 组):
+本轮按交付要求删除了 MCU 侧参考实现,并清理文档引用:
 
 ```
-① feat(protocol): VEL 速度矢量 + 四轮二进制帧(CRC8/seq)
-   → protocol.py, config.py, tools/mcu/, tests/test_smoke.py, tests/test_wheel_frame.py
-
-② feat(motion,chart): 定频运动下发 + 四轮转速曲线
-   → motion.py, chart.py, tests/test_motion.py, tests/test_chart.py
-
-③ fix(link): 串口读线程重连/按钮自锁/NameError + GUI 波特率选择
-   → link.py, backend*.py, frontend.py, tests/test_gui_flow.py, tests/test_serial_backend.py
+M README.md
+M docs/API.md
+M docs/DEVELOPMENT.md
+D tools/mcu/chassis_protocol.c
 ```
 
-**提交前务必先在 Windows 侧跑通全部 6 个测试。**
+改动要点:
+
+- 删除 `tools/mcu/chassis_protocol.c`(及空目录 `tools/mcu/`);
+- README 移除“MCU 端参考实现”段落与文档导航行,API 章节数 14 → 13;
+- API 删除“MCU 端接口(C 参考)”整章,原第 14 章顺延为第 13 章;
+- 本文件移除待办、提交清单、下一步、关键文件表中的 C 文件引用;
+- API 第 11 章子节编号 `9.1~9.5` 修正为 `11.1~11.5`;
+- README/API 中“混流互不干扰”的表述改为“已知限制”(见第十一节第 1 项);
+- 补充第十一节“已知问题”(本轮实测)。
+
+提交建议:`docs: 移除 MCU 参考实现并清理文档引用`。
 
 ---
 
@@ -246,7 +254,7 @@ uv run python tools/bench_hc06.py COM15 115200             # 吞吐基准
 | # | 坑 | 现象 | 根因 | 修法 |
 | :--- | :--- | :--- | :--- | :--- |
 | 1 | **偏心转** | 车转得比预期快、转心偏移 | θ 被积分两次(上位机 + MCU) | MCU 不积分;SIGN=-1 反向补偿 |
-| 2 | **读线程自动重连失效** | 掉线后不重连 | 读线程里 `asyncio.get_event_loop()` 必然抛错 | `run_coroutine_threadsafe` + 保存 loop 引用 |
+| 2 | **读线程自动重连失效** | 掉线后不重连 | 读线程里 `asyncio.get_event_loop()` 必然抛错 | `run_coroutine_threadsafe` + 保存 loop 引用(历史修复;当前仍有自取消问题,见第十一节) |
 | 3 | **连接按钮自锁** | 连上后按钮仍可点,二次连接失败 | 成功回调误调 `_ready_buttons()` | 成功只调 `_set_connected()` |
 | 4 | **`except` 变量 NameError** | 连接失败时 GUI 崩 | lambda 延迟引用被 Python 销毁的 `exc` | 创建 lambda 时用默认参数绑定值 |
 | 5 | **ttk 背景色报错** | `unknown option "-background"` | `ttk.Frame` 不支持 `cget("background")` | 图例用 `tk.Label`,不显式设背景 |
@@ -258,9 +266,9 @@ uv run python tools/bench_hc06.py COM15 115200             # 吞吐基准
 ## 九、下一步建议(给接手者)
 
 1. **先读** `README.md`(协议 + 硬件结论)→ `docs/API.md`(全部 API);
-2. **跑测试** 确认环境正常(6 个测试全绿);
-3. **接 MCU**:把 `tools/mcu/chassis_protocol.c` 的三个函数(解析/CRC/发帧)并入固件,
-   实现 `chassis_apply_velocity()` 的舵轮逆解(参考文件末尾的公式注释);
+2. **跑测试** 确认环境正常(本机 5 套全绿;motion 2 项受 Windows 定时粒度影响,见第十一节);
+3. **接 MCU**:由底盘固件按 `docs/API.md` 第 2 章的线格式实现解析、CRC 与 11B 帧发送;
+   本仓库只负责上位机与协议文档,不提供 MCU 侧代码;
 4. **端到端验证**:GUI 发 VEL → 底盘动作 → 回传四轮 rpm → 曲线滚动;
 5. **加业务限幅**(第 3 项待办),防止误操作把底盘甩飞;
 6. **提交 git**。
@@ -277,6 +285,20 @@ uv run python tools/bench_hc06.py COM15 115200             # 吞吐基准
 | `src/ble_chassis_control/backend_serial.py` | 串口后端(HC-06 实际用这个) |
 | `src/ble_chassis_control/chart.py` | 四轮转速曲线 |
 | `src/ble_chassis_control/config.py` | **所有可调参数集中于此** |
-| `tools/mcu/chassis_protocol.c` | **MCU 端参考实现**(交给嵌入式同事) |
-| `docs/API.md` | 完整接口文档(14 章) |
-| `tests/` | 6 套测试(共 31 个用例;运行输出 42 项检查) |
+| `docs/API.md` | 完整接口文档(13 章) |
+| `tests/` | 6 套测试(本机 5 套全绿;motion 8/10,详见第十一节) |
+
+---
+
+## 十一、已知问题(本轮实测)
+
+> 以下为 2026-10-24 在 Windows 本机复测结果。均不影响 HC-05 手动遥控;但第 1、2 项会直接影响回传显示与断线恢复,建议联调前优先处理。
+
+| # | 问题 | 位置 | 实测/现象 | 建议 |
+| :--- | :--- | :--- | :--- | :--- |
+| 1 | **二进制帧污染文本行** | `link.py` `_feed_bytes()` | 100Hz 四轮帧 + 10Hz `TEL` 混流:100 帧正常,但 0/10 条 `TEL` 解析成功;日志出现 `ª...TEL:...` 乱码,`garbage_bytes` 把正常文本也计入 | 改为单一字节流解复用器(帧优先,剩余字节交给文本);补 `_feed_bytes` 混流回归测试 |
+| 2 | **串口自动重连不生效** | `backend_serial.py` `_reconnect_loop()` / `disconnect()` | 强制读异常后等待 7s 仍为断开,状态停在“5 秒后自动重连串口 ...”;原因是 `disconnect()` 取消了正在运行的重连任务自身 | 仅手动断开时取消重连任务;重连路径不要调用会取消自身的 `disconnect()` |
+| 3 | **`SET` 小数语义未定义** | `protocol.py` `encode_set()` / 协议文档 | 上位机默认发 `SET:MAX_SPEED:0.8`;按整数解析的固件会拒绝(`ERR:BAD_SET_NUM`) | 明确 `SET` 值为 ×1000 定点,或协议层改为整数 + 逐参数缩放 |
+| 4 | **断开时 STOP 可能未发出** | `frontend.py` `on_disconnect()` | `motion.stop()` 与 `disconnect()` 并发,串口可能先关闭,运动协程的 STOP 写不出去 | 断开前等待运动协程退出并确认 STOP 写入(复用 `_shutdown_sequence`) |
+| 5 | **定频下发频率偏低** | `motion.py` + Windows 定时粒度 | 20Hz 设定约 17 帧/s;50Hz 约 32.2Hz;`test_motion.py` 2 项因此失败 | 可选 `winmm.timeBeginPeriod(1)`;或调整测试容差并标注平台差异 |
+| 6 | **`verify_serial.py` 执行两次** | `tools/verify_serial.py` | 文件尾部有两个 `if __name__ == "__main__"` 块,脚本会完整跑两遍 | 删除重复块,并把示例 `MOT:0,0` 改为 `VEL` |

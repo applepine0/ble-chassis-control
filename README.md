@@ -100,7 +100,7 @@ VEL:<v_mmps>,<deg_tenths>,<omega_mradps>
 - **seq**:序号循环,上位机据此统计**丢帧率**(蓝牙字节流无消息边界,丢帧只能靠序号发现);
 - **crc8**:CRC-8/ATM(多项式 0x07),拒绝误码帧;
 - **单位 rpm**(缩放 1,即线上值就是 rpm 整数;见 `config.WHEEL_SPEED_SCALE`);
-- 与文本行**可混用**:接收侧并行解析,互不干扰;
+- 与文本行**设计上可混用**:接收侧并行解析;⚠️ 当前实现存在混流缺陷,见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) 的“已知问题”;
 - 带宽:@115200 下 100Hz 仅占 9.5%。
 
 ```python
@@ -108,9 +108,6 @@ link = SerialBackend("COM15", 115200,
                      on_wheel=lambda f: print(f.speeds),      # 四轮速度帧
                      on_stats=lambda s: print(s.loss_rate))   # 丢帧率
 ```
-
-**MCU 端参考实现**:`tools/mcu/chassis_protocol.c` 的 `proto_send_wheel_frame()`
-(已用 gcc 与 Python 端逐字节比对一致)。
 
 编码默认 utf-8;协议定义集中在 `src/ble_chassis_control/protocol.py`。
 
@@ -129,8 +126,7 @@ link = SerialBackend("COM15", 115200,
 | :--- | :--- | :--- |
 | **本文(README)** | 快速上手、协议、硬件诊断结论 | 所有人 |
 | **[`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)** | **开发交接**:当前状态/待办、设计决策与原因、踩坑史、线程模型 | **接手开发者 / 新 AI 会话** |
-| [`docs/API.md`](docs/API.md) | 完整接口文档(14 章) | 调用 API 的人 |
-| [`tools/mcu/chassis_protocol.c`](tools/mcu/chassis_protocol.c) | MCU 端参考实现 | 嵌入式同事 |
+| [`docs/API.md`](docs/API.md) | 完整接口文档(13 章) | 调用 API 的人 |
 
 ## 接口文档
 

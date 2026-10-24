@@ -151,7 +151,11 @@ t=1.00s  VEL:500,-900,1571     θ_body=-90°  → 世界系方向仍为 0°
 #### 与文本行混用
 
 接收侧**两者并行解析**:二进制帧由独立状态机处理(遇 `0xAA` 尝试定长解析,
-CRC 不过则丢弃首字节继续扫描),文本行按 `\n` 分帧。互不干扰。
+CRC 不过则丢弃首字节继续扫描),文本行按 `\n` 分帧。
+
+> ⚠️ **已知限制**:当前接收层把同一份字节同时交给帧解析器与文本分帧器,
+> 帧内字节可能污染文本行(实测 100Hz 反馈 + `TEL` 混流时 `TEL` 解析失败)。
+> 修复方向见 [`DEVELOPMENT.md`](DEVELOPMENT.md) 的“已知问题”。
 
 #### 上层接口
 
@@ -555,7 +559,7 @@ main()           # 模块级入口(console_scripts 指向)
 
 **结论:当前架构完全支持只下发,无需任何改动、无兼容风险。**
 
-### 9.1 为什么支持(设计依据)
+### 11.1 为什么支持(设计依据)
 
 | 层 | 依据 |
 | :--- | :--- |
@@ -568,7 +572,7 @@ main()           # 模块级入口(console_scripts 指向)
 **已实测**:HC-06 未接 MCU 时,连续发送 `VEL:500,900,0` 全部成功(0 失败),
 30 秒基准测试中 0 掉线 —— 对应"对端不回传"场景。
 
-### 9.2 使用方式
+### 11.2 使用方式
 
 **脚本(显式忽略接收)**
 
@@ -588,7 +592,7 @@ asyncio.run(main())
 
 **GUI**:直接使用 `发送速度` / `急停` 按钮即可,日志区没有 RX 行属正常现象。
 
-### 9.3 行为对照表
+### 11.3 行为对照表
 
 | 场景 | 只下发时的表现 |
 | :--- | :--- |
@@ -597,9 +601,9 @@ asyncio.run(main())
 | 日志 | 只有 TX 与系统行,无 RX 行 |
 | 状态栏 | 正常显示"已连接 (COM15@115200)" |
 | BLE 模块无 notify 特征 | ⚠️ 打一条警告,连接与写入仍可用 |
-| 断线检测 | ⚠️ **仅靠写失败/串口异常**,无心跳超时机制(见 9.4) |
+| 断线检测 | ⚠️ **仅靠写失败/串口异常**,无心跳超时机制(见 11.4) |
 
-### 9.4 已知限制(只下发模式特有)
+### 11.4 已知限制(只下发模式特有)
 
 | 限制 | 影响 | 建议 |
 | :--- | :--- | :--- |
@@ -609,14 +613,12 @@ asyncio.run(main())
 
 > 以上限制**不影响手动遥控**;若做自动驾驶/闭环控制,建议启用轻量回传。
 
-### 9.5 推荐最小回传(可选,后期再加)
+### 11.5 推荐最小回传(可选,后期再加)
 
-若将来想低成本加回传,MCU 侧只需:
+若将来想低成本加回传,MCU 侧只需每 100ms 输出一行:
 
-```c
-/* 每 100ms 上报一次,仅 24 字节 → @115200 占用约 0.2% */
-proto_send_telemetry_raw(v_mmps, deg_tenths, omega_mradps);
-/* 输出: TEL:V:500,DEG:900,OMEGA:0\n */
+```text
+TEL:V:500,DEG:900,OMEGA:0
 ```
 
 上位机日志会自动结构化显示为 `TEL V=500, DEG=900, OMEGA=0`。
@@ -638,28 +640,7 @@ class LinkError(Exception)   # link.py;BLEError 为其别名
 
 ---
 
-## 十三、MCU 端接口(C 参考)
-
-`tools/mcu/chassis_protocol.c`:
-
-```c
-void proto_feed_byte(uint8_t byte);                    // UART 中断里调用
-void chassis_apply_velocity(int32_t v_mmps, int32_t deg_tenths, int32_t omega_mradps);
-void chassis_stop(void);
-void chassis_set_param(const char *name, int32_t value);
-void chassis_send_line(const char *text);              // 内部补 \n
-void proto_send_telemetry_raw(int32_t v, int32_t deg, int32_t omega);
-```
-
-**接入三步**
-
-1. `proto_feed_byte()` 挂到 UART 接收中断;
-2. 实现 `chassis_apply_velocity()`(舵轮逆解 + 电机驱动);
-3. (可选)定时调用 `proto_send_telemetry_raw()` 上报遥测 —— **不加也能正常接收指令**。
-
----
-
-## 十四、典型使用示例
+## 十三、典型使用示例
 
 ### 脚本方式(只下发)
 
