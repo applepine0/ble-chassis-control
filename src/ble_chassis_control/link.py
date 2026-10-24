@@ -121,7 +121,14 @@ class ChassisLink(ABC):
 
         await self.send(Protocol.encode_raw(text))
 
+    async def send_vel(self, speed_mps: float, deg: float, omega_radps: float) -> None:
+        """速度矢量指令(主指令):速度大小 m/s + 方向 deg + 自转 rad/s。"""
+        from .protocol import Protocol
+
+        await self.send(Protocol.encode_vel(speed_mps, deg, omega_radps))
+
     async def send_mot(self, left: float, right: float) -> None:
+        """差速指令(兼容旧接口)。"""
         from .protocol import Protocol
 
         await self.send(Protocol.encode_mot(left, right))

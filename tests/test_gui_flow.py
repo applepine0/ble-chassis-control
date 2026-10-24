@@ -42,6 +42,9 @@ class FakeBackend:
     async def disconnect(self) -> None:
         self.connected = False
 
+    async def send_vel(self, speed_mps: float, deg: float, omega_radps: float) -> None:
+        self.sent.append(f"VEL:{speed_mps},{deg},{omega_radps}")
+
     async def send_mot(self, left: float, right: float) -> None:
         self.sent.append(f"MOT:{left},{right}")
 
@@ -78,14 +81,16 @@ def run() -> None:
         assert "0000ffe1" in app.info_var.get(), app.info_var.get()
         print("1) 连接流程 + 状态/GATT 展示: OK")
 
-        # 2) 发送 MOT
-        app.left_var.set(25.0)
-        app.right_var.set(-10.0)
-        app.on_send_mot()
+        # 2) 发送速度矢量 (VEL)
+        app.speed_var.set(0.5)
+        app.deg_var.set(90.0)
+        app.omega_var.set(-0.5)
+        app.on_send_vel()
         pump(app, 0.5)
-        assert fake.sent == ["MOT:25.0,-10.0"], fake.sent
-        assert "TX> MOT 25,-10" in app.log.get("1.0", "end"), app.log.get("1.0", "end")
-        print("2) MOT 发送 + TX 日志: OK")
+        assert fake.sent == ["VEL:0.5,90.0,-0.5"], fake.sent
+        assert "TX> VEL 0.5 m/s, 90°, -0.5 rad/s" in app.log.get("1.0", "end"), \
+            app.log.get("1.0", "end")
+        print("2) VEL 速度矢量发送 + TX 日志: OK")
 
         # 3) 急停
         app.on_stop()

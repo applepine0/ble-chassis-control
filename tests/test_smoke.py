@@ -14,10 +14,36 @@ from ble_chassis_control.backend import BLEBackend  # noqa: E402
 
 
 def test_protocol() -> None:
+    # ---- VEL(主指令:定点整数编码) ----
+    assert Protocol.encode_vel(0.5, 90, 0) == b"VEL:500,900,0\n"
+    assert Protocol.encode_vel(0.0, 0.0, 1.57) == b"VEL:0,0,1570\n"
+    assert Protocol.encode_vel(0.8, 45, -0.5) == b"VEL:800,450,-500\n"
+    # 负速度钳位为 0(速度是标量大小)
+    assert Protocol.encode_vel(-1.0, 90, 0) == b"VEL:0,900,0\n"
+    # 四舍五入精度:0.25 m/s → 250 mm/s;0.123 rad/s → 123 mrad/s
+    assert Protocol.encode_vel(0.25, -30, 0.123) == b"VEL:250,-300,123\n"
+
+    p = Protocol.parse_line("VEL:500,900,0")
+    assert p.kind == "vel" and p.error is None
+    assert p.params["speed_mps"] == 0.5
+    assert p.params["deg"] == 90.0
+    assert p.params["omega_radps"] == 0.0
+    assert p.params["raw_int"] == (500, 900, 0)
+
+    p = Protocol.parse_line("VEL:0,0,1570")
+    assert p.params["omega_radps"] == 1.57, p
+    p = Protocol.parse_line("VEL:800,450,-500")
+    assert p.params["omega_radps"] == -0.5, p
+
+    # 错误用例
+    assert Protocol.parse_line("VEL:500,900").error, "缺参数应报错"
+    assert Protocol.parse_line("VEL:a,b,c").error, "非整数应报错"
+
+    # ---- 兼容:旧 MOT 接口 ----
     mot = Protocol.encode_mot(25.0, -30.5)
     assert mot == b"MOT:25,-30.5\n", mot
     assert Protocol.encode_stop() == b"STOP\n"
-    assert Protocol.encode_set("MAX_SPEED", 80) == b"SET:MAX_SPEED:80\n"
+    assert Protocol.encode_set("MAX_SPEED", 0.8) == b"SET:MAX_SPEED:0.8\n"
     assert Protocol.encode_raw("hi") == b"hi\n"
     assert Protocol.encode_raw("hi\n") == b"hi\n"
 

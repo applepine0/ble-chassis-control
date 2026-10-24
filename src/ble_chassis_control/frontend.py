@@ -19,6 +19,7 @@ from . import config
 from .backend import BLEBackend, BLEError
 from .backend_serial import SerialBackend, available_ports
 from .link import ChassisLink, LinkError
+from .motion import MotionRunner
 from .protocol import ParsedMessage
 
 # 界面配色
@@ -50,6 +51,7 @@ class App(tk.Tk):
 
         # 当前链路(默认串口;由界面单选切换)
         self.backend: ChassisLink = self._make_link(config.LINK_KIND)
+        self.motion: "MotionRunner | None" = None   # 定频运动下发器
         self.rx_queue: "queue.Queue[tuple]" = queue.Queue()
 
         self._build_ui()
@@ -64,15 +66,6 @@ class App(tk.Tk):
         if kind == "ble":
             return BLEBackend(on_line=self._on_line_cb, on_state=self._on_state_cb)
         return SerialBackend(on_line=self._on_line_cb, on_state=self._on_state_cb)
-
-    def _rebuild_link(self) -> None:
-        """切换链路类型:先断开旧链路,再创建新的。"""
-        old = self.backend
-        if old.is_connected:
-            self._submit(old.disconnect())
-        self.backend = self._make_link(self.link_kind.get())
-        self.log_sys(f"链路已切换为:{'BLE' if self.link_kind.get() == 'ble' else '串口'}")
-        self._sync_target_field()
 
     # ------------------------------------------------------------------
     # 异步循环
@@ -140,24 +133,31 @@ class App(tk.Tk):
         ttk.Button(top, text="刷新口", width=8, command=self._refresh_ports).grid(
             row=0, column=4, padx=2
         )
+        # 波特率下拉(串口模式下可选;必须与模块/MCU 一致)
+        self.baud_var = tk.StringVar(value=str(config.SERIAL_BAUDRATE))
+        self.baud_box = ttk.Combobox(
+            top, textvariable=self.baud_var, width=8, state="readonly",
+            values=[str(b) for b in config.SERIAL_BAUD_CHOICES],
+        )
+        self.baud_box.grid(row=0, column=5, padx=2)
         self.btn_conn = ttk.Button(top, text="连接", command=self.on_connect)
-        self.btn_conn.grid(row=0, column=5, padx=6)
+        self.btn_conn.grid(row=0, column=6, padx=6)
         self.btn_disc = ttk.Button(
             top, text="断开", command=self.on_disconnect, state="disabled"
         )
-        self.btn_disc.grid(row=0, column=6, padx=2)
+        self.btn_disc.grid(row=0, column=7, padx=2)
         ttk.Button(top, text="自检", command=self.on_self_check).grid(
-            row=0, column=7, padx=2
+            row=0, column=8, padx=2
         )
         self.status_var = tk.StringVar(value="未连接")
         ttk.Label(top, textvariable=self.status_var, foreground=C_SYS).grid(
-            row=0, column=8, sticky="e", padx=6
+            row=0, column=9, sticky="e", padx=6
         )
 
         # 第二行:串口列表/提示
         self.port_hint = tk.StringVar(value="")
         ttk.Label(top, textvariable=self.port_hint, foreground=C_SYS).grid(
-            row=1, column=0, columnspan=9, sticky="w", pady=(4, 0)
+            row=1, column=0, columnspan=10, sticky="w", pady=(4, 0)
         )
         self._sync_target_field()
         self._refresh_ports()
@@ -168,61 +168,114 @@ class App(tk.Tk):
         mid.columnconfigure(1, weight=1)
         mid.rowconfigure(0, weight=1)
 
-        ctrl = ttk.LabelFrame(mid, text=" 底盘控制 ", padding=8)
+        ctrl = ttk.LabelFrame(mid, text=" 底盘控制 (速度矢量) ", padding=8)
         ctrl.grid(row=0, column=0, sticky="n", padx=(0, 8))
+        ctrl.columnconfigure(1, weight=1)
 
-        ttk.Label(ctrl, text="左轮速度 %").grid(row=0, column=0, sticky="w")
-        self.left_var = tk.DoubleVar(value=0.0)
+        # 速度大小 m/s
+        ttk.Label(ctrl, text="速度 m/s").grid(row=0, column=0, sticky="w")
+        self.speed_var = tk.DoubleVar(value=0.0)
         ttk.Scale(
             ctrl,
-            from_=-100, to=100, variable=self.left_var,
-            length=200, command=self._scale_drag,
+            from_=0, to=config.VEL_UI_MAX, variable=self.speed_var,
+            length=190, command=self._scale_drag,
         ).grid(row=0, column=1, padx=6, pady=4)
-        self.left_spin = ttk.Spinbox(
-            ctrl, from_=-100, to=100, textvariable=self.left_var, width=8
-        )
-        self.left_spin.grid(row=0, column=2)
+        ttk.Spinbox(
+            ctrl, from_=0, to=config.VEL_UI_MAX, increment=0.05,
+            textvariable=self.speed_var, width=7,
+        ).grid(row=0, column=2)
 
-        ttk.Label(ctrl, text="右轮速度 %").grid(row=1, column=0, sticky="w", pady=(8, 0))
-        self.right_var = tk.DoubleVar(value=0.0)
+        # 方向角 deg(协议不定义参考系;此处 UI 按车头坐标系、0°=正前、逆时针为正)
+        ttk.Label(ctrl, text="方向 deg").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        self.deg_var = tk.DoubleVar(value=0.0)
         ttk.Scale(
             ctrl,
-            from_=-100, to=100, variable=self.right_var,
-            length=200, command=self._scale_drag,
+            from_=config.DEG_UI_MIN, to=config.DEG_UI_MAX, variable=self.deg_var,
+            length=190, command=self._scale_drag,
         ).grid(row=1, column=1, padx=6, pady=4)
-        self.right_spin = ttk.Spinbox(
-            ctrl, from_=-100, to=100, textvariable=self.right_var, width=8
-        )
-        self.right_spin.grid(row=1, column=2)
+        ttk.Spinbox(
+            ctrl, from_=config.DEG_UI_MIN, to=config.DEG_UI_MAX, increment=5.0,
+            textvariable=self.deg_var, width=7,
+        ).grid(row=1, column=2)
+
+        # 自转角速度 rad/s
+        ttk.Label(ctrl, text="自转 rad/s").grid(row=2, column=0, sticky="w", pady=(6, 0))
+        self.omega_var = tk.DoubleVar(value=0.0)
+        ttk.Scale(
+            ctrl,
+            from_=config.OMEGA_UI_MIN, to=config.OMEGA_UI_MAX, variable=self.omega_var,
+            length=190, command=self._scale_drag,
+        ).grid(row=2, column=1, padx=6, pady=4)
+        ttk.Spinbox(
+            ctrl, from_=config.OMEGA_UI_MIN, to=config.OMEGA_UI_MAX, increment=0.1,
+            textvariable=self.omega_var, width=7,
+        ).grid(row=2, column=2)
+
+        ttk.Label(
+            ctrl, text="(UI 约定:车头坐标系,0°=正前,逆时针为正)",
+            foreground=C_SYS, font=("", 8),
+        ).grid(row=3, column=0, columnspan=3, sticky="w", pady=(2, 0))
 
         btns = ttk.Frame(ctrl)
-        btns.grid(row=2, column=0, columnspan=3, pady=10, sticky="ew")
-        self.btn_mot = ttk.Button(btns, text="发送速度", command=self.on_send_mot)
+        btns.grid(row=4, column=0, columnspan=3, pady=10, sticky="ew")
+        self.btn_mot = ttk.Button(btns, text="发送一次", command=self.on_send_vel)
         self.btn_mot.pack(side="left", expand=True, fill="x", padx=4)
         self.btn_stop = ttk.Button(btns, text="急停", command=self.on_stop)
         self.btn_stop.pack(side="left", expand=True, fill="x", padx=4)
 
-        ttk.Separator(ctrl).grid(row=3, column=0, columnspan=3, sticky="ew", pady=6)
+        # --- 定频运动下发(θ 按 ω 累积)---
+        motion = ttk.LabelFrame(ctrl, text=" 旋转前进(定频下发) ", padding=6)
+        motion.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(4, 0))
+        motion.columnconfigure(3, weight=1)
+
+        ttk.Label(motion, text="频率 Hz").grid(row=0, column=0, sticky="w")
+        self.rate_var = tk.DoubleVar(value=config.MOTION_RATE_HZ)
+        ttk.Spinbox(
+            motion, from_=config.MOTION_RATE_MIN, to=config.MOTION_RATE_MAX,
+            increment=1.0, textvariable=self.rate_var, width=6,
+        ).grid(row=0, column=1, padx=(4, 10))
+        self.motion_state = tk.StringVar(value="未运行")
+        ttk.Label(motion, textvariable=self.motion_state,
+                  foreground=C_SYS).grid(row=0, column=3, sticky="e")
+
+        mbtns = ttk.Frame(motion)
+        mbtns.grid(row=1, column=0, columnspan=4, sticky="ew", pady=(6, 0))
+        self.btn_motion_start = ttk.Button(
+            mbtns, text="启动运动", command=self.on_motion_start
+        )
+        self.btn_motion_start.pack(side="left", expand=True, fill="x", padx=3)
+        self.btn_motion_stop = ttk.Button(
+            mbtns, text="停止运动", command=self.on_motion_stop, state="disabled"
+        )
+        self.btn_motion_stop.pack(side="left", expand=True, fill="x", padx=3)
+
+        ttk.Label(
+            motion,
+            text="启动后按频率持续下发 θ(t)=θ₀+∫ω·dt(方向随自转累积)",
+            foreground=C_SYS, font=("", 8),
+        ).grid(row=2, column=0, columnspan=4, sticky="w", pady=(4, 0))
+
+        ttk.Separator(ctrl).grid(row=6, column=0, columnspan=3, sticky="ew", pady=6)
 
         # 通用 SET 命令
-        ttk.Label(ctrl, text="SET 命令:").grid(row=4, column=0, sticky="w")
+        ttk.Label(ctrl, text="SET 命令:").grid(row=7, column=0, sticky="w")
         self.set_name = ttk.Entry(ctrl, width=10)
-        self.set_name.grid(row=4, column=1, sticky="ew", padx=6)
+        self.set_name.grid(row=7, column=1, sticky="ew", padx=6)
         self.set_name.insert(0, "MAX_SPEED")
         self.set_val = ttk.Entry(ctrl, width=8)
-        self.set_val.grid(row=4, column=2)
-        self.set_val.insert(0, "80")
+        self.set_val.grid(row=7, column=2)
+        self.set_val.insert(0, "0.8")
         self.btn_set = ttk.Button(ctrl, text="发送 SET", command=self.on_send_set)
-        self.btn_set.grid(row=5, column=0, columnspan=3, sticky="ew", pady=8)
+        self.btn_set.grid(row=8, column=0, columnspan=3, sticky="ew", pady=8)
 
         # 手动透传行
-        ttk.Label(ctrl, text="手动发送:").grid(row=6, column=0, sticky="w")
+        ttk.Label(ctrl, text="手动发送:").grid(row=9, column=0, sticky="w")
         self.raw_var = tk.StringVar()
         ttk.Entry(ctrl, textvariable=self.raw_var).grid(
-            row=6, column=1, columnspan=2, sticky="ew", padx=6
+            row=9, column=1, columnspan=2, sticky="ew", padx=6
         )
         self.btn_raw = ttk.Button(ctrl, text="发送", command=self.on_send_raw)
-        self.btn_raw.grid(row=7, column=0, columnspan=3, sticky="ew", pady=8)
+        self.btn_raw.grid(row=10, column=0, columnspan=3, sticky="ew", pady=8)
 
         # 右侧:日志
         logf = ttk.LabelFrame(mid, text=" 通信日志 ", padding=4)
@@ -298,7 +351,11 @@ class App(tk.Tk):
             self.backend.address = value.upper()   # type: ignore[attr-defined]
         else:
             self.backend.port = value             # type: ignore[attr-defined]
-            self.backend.baudrate = config.SERIAL_BAUDRATE  # type: ignore[attr-defined]
+            try:
+                self.backend.baudrate = int(self.baud_var.get())  # type: ignore[attr-defined]
+            except (tk.TclError, ValueError):
+                messagebox.showwarning("输入错误", "波特率必须是整数")
+                return
         self.log_sys(f"连接目标:{self.backend.kind} / {self.backend.target or '(自动)'}")
         self.btn_conn.configure(state="disabled")
         self.btn_disc.configure(state="disabled")
@@ -316,8 +373,22 @@ class App(tk.Tk):
         )
 
     def on_disconnect(self) -> None:
+        if self.motion is not None and self.motion.is_running:
+            self.motion.stop()
+            self.log_sys("断开前:已终止运动下发")
         self._submit(self.backend.disconnect())
         self._set_disconnected()
+
+    def _rebuild_link(self) -> None:
+        """切换链路类型:先停运动、断开旧链路,再创建新的。"""
+        if self.motion is not None and self.motion.is_running:
+            self.motion.stop()
+        old = self.backend
+        if old.is_connected:
+            self._submit(old.disconnect())
+        self.backend = self._make_link(self.link_kind.get())
+        self.log_sys(f"链路已切换为:{'BLE' if self.link_kind.get() == 'ble' else '串口'}")
+        self._sync_target_field()
 
     def on_self_check(self) -> None:
         """一键自检:串口列出可用口;BLE 扫描目标模块广播。"""
@@ -361,21 +432,99 @@ class App(tk.Tk):
         else:
             self.log_sys("自检完成:模块在广播;如仍连接超时,请执行 README 排查清单")
 
-    def on_send_mot(self) -> None:
+    def on_send_vel(self) -> None:
+        """发送速度矢量:速度大小 m/s + 方向 deg + 自转 rad/s。"""
         try:
-            left = float(self.left_var.get())
-            right = float(self.right_var.get())
+            speed = float(self.speed_var.get())
+            deg = float(self.deg_var.get())
+            omega = float(self.omega_var.get())
         except (tk.TclError, ValueError):
-            messagebox.showwarning("输入错误", "速度必须是数字")
+            messagebox.showwarning("输入错误", "速度/方向/自转 必须是数字")
             return
-        self.log_tx(f"MOT {left:g},{right:g}")
-        self._submit(self.backend.send_mot(left, right))
+        self.log_tx(f"VEL {speed:g} m/s, {deg:g}°, {omega:g} rad/s")
+        self._submit(self.backend.send_vel(speed, deg, omega))
 
     def on_stop(self) -> None:
-        self.left_var.set(0.0)
-        self.right_var.set(0.0)
+        """急停:先终止定频运动(若在运行),再发 STOP。"""
+        if self.motion is not None and self.motion.is_running:
+            self.motion.stop()
+            self.log_sys("急停:已终止运动下发")
+        self.speed_var.set(0.0)
+        self.omega_var.set(0.0)
         self.log_tx("STOP 急停")
         self._submit(self.backend.send_stop())
+
+    # ------------------------------------------------------------------
+    # 定频运动下发(θ 按 ω 累积 —— 旋转前进)
+    # ------------------------------------------------------------------
+    def on_motion_start(self) -> None:
+        """启动定频下发:θ(t) = θ₀ + ∫ω·dt,持续下发直到停止。"""
+        if self.motion is not None and self.motion.is_running:
+            self.log_sys("运动已在运行,忽略重复启动")
+            return
+        if not self.backend.is_connected:
+            messagebox.showwarning("未连接", "请先连接链路,再启动运动")
+            return
+        try:
+            v = float(self.speed_var.get())
+            theta0 = float(self.deg_var.get())
+            omega = float(self.omega_var.get())
+            rate = float(self.rate_var.get())
+        except (tk.TclError, ValueError):
+            messagebox.showwarning("输入错误", "速度/方向/自转/频率 必须是数字")
+            return
+        if rate <= 0:
+            messagebox.showwarning("输入错误", "频率必须大于 0")
+            return
+
+        self.motion = MotionRunner(
+            self.backend,
+            v=v, theta0=theta0, omega=omega, rate_hz=rate,
+            on_tick=self._on_motion_tick,
+            stop_on_error=config.MOTION_STOP_ON_ERROR,
+        )
+        self.btn_motion_start.configure(state="disabled")
+        self.btn_motion_stop.configure(state="normal")
+        self.motion_state.set(f"运行中 @{rate:g}Hz")
+        self.log_sys(
+            f"启动运动:v={v:g} m/s, θ₀={theta0:g}°, ω={omega:g} rad/s, "
+            f"{rate:g}Hz(θ 将按 ω 累积)"
+        )
+        self._submit(
+            self.motion.run(),
+            on_success=lambda elapsed: self._on_motion_finished(elapsed),
+            on_error=lambda err: (
+                self.log_err(f"运动异常:{err}"),
+                self._reset_motion_buttons("异常停止"),
+            ),
+        )
+
+    def on_motion_stop(self) -> None:
+        if self.motion is None or not self.motion.is_running:
+            return
+        self.log_sys("请求停止运动(将下发 STOP)")
+        self.motion.stop()
+        self.motion_state.set("停止中 ...")
+
+    def _on_motion_tick(self, tick) -> None:
+        """每次下发后的回调(在事件循环线程)—— 只更新界面状态,避免刷屏。"""
+        self.rx_queue.put(("ui", lambda t=tick: self._update_motion_status(t)))
+
+    def _update_motion_status(self, tick) -> None:
+        self.motion_state.set(
+            f"运行中 θ={tick.theta_deg:7.1f}° "
+            f"v={tick.v_mps:g} ω={tick.omega_radps:g} "
+            f"#{tick.index} t={tick.elapsed:.1f}s"
+        )
+
+    def _on_motion_finished(self, elapsed: float) -> None:
+        self.log_sys(f"运动结束(运行 {elapsed:.1f}s),已下发 STOP")
+        self._reset_motion_buttons("已停止")
+
+    def _reset_motion_buttons(self, state: str) -> None:
+        self.btn_motion_start.configure(state="normal")
+        self.btn_motion_stop.configure(state="disabled")
+        self.motion_state.set(state)
 
     def on_send_set(self) -> None:
         name = self.set_name.get().strip()
@@ -412,6 +561,12 @@ class App(tk.Tk):
                     if parsed.kind == "tel":
                         kv = ", ".join(f"{k}={v:g}" for k, v in parsed.params["values"].items())
                         self.log_rx(f"TEL {kv}  |  {line}")
+                    elif parsed.kind == "vel":
+                        p = parsed.params
+                        self.log_rx(
+                            f"VEL {p['speed_mps']:g} m/s, {p['deg']:g}°, "
+                            f"{p['omega_radps']:g} rad/s  |  {line}"
+                        )
                     else:
                         self.log_rx(line)
                 elif kind == "state":
@@ -478,15 +633,33 @@ class App(tk.Tk):
     # 关闭
     # ------------------------------------------------------------------
     def on_close(self) -> None:
+        # 安全:先终止定频运动,并确保底盘收到 STOP
+        try:
+            if self.motion is not None and self.motion.is_running:
+                self.motion.stop()
+        except Exception:
+            pass
         try:
             fut = asyncio.run_coroutine_threadsafe(
-                self.backend.disconnect(), self.loop
+                self._shutdown_sequence(), self.loop
             )
             fut.result(timeout=3)
         except Exception:
             pass
         self.loop.call_soon_threadsafe(self.loop.stop)
         self.destroy()
+
+    async def _shutdown_sequence(self) -> None:
+        """关闭前:等运动协程收尾(其内部会发 STOP),再断开链路。"""
+        if self.motion is not None and self.motion.is_running:
+            for _ in range(20):                 # 最多等 2 秒让 run() 退出并发 STOP
+                if not self.motion.is_running:
+                    break
+                await asyncio.sleep(0.1)
+        try:
+            await self.backend.disconnect()
+        except Exception:
+            pass
 
 
 def main() -> None:
