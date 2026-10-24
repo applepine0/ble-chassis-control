@@ -62,10 +62,39 @@ class App(tk.Tk):
     # 链路构建
     # ------------------------------------------------------------------
     def _make_link(self, kind: str) -> ChassisLink:
-        """按类型创建链路对象(BLE / 串口)。"""
+        """按类型创建链路对象(BLE / 串口),并挂上四轮速度帧回调。"""
+        kwargs = dict(
+            on_line=self._on_line_cb,
+            on_state=self._on_state_cb,
+            on_wheel=self._on_wheel_cb,
+            on_stats=self._on_stats_cb,
+        )
         if kind == "ble":
-            return BLEBackend(on_line=self._on_line_cb, on_state=self._on_state_cb)
-        return SerialBackend(on_line=self._on_line_cb, on_state=self._on_state_cb)
+            return BLEBackend(**kwargs)
+        return SerialBackend(**kwargs)
+
+    # ------------------------------------------------------------------
+    # 四轮速度反馈(二进制帧)回调 —— 后台线程,经队列送 GUI
+    # ------------------------------------------------------------------
+    def _on_wheel_cb(self, frame) -> None:
+        self.rx_queue.put(("wheel", frame))
+
+    def _on_stats_cb(self, stats) -> None:
+        self.rx_queue.put(("stats", stats))
+
+    def _show_wheel_frame(self, frame) -> None:
+        """显示四轮速度(定长帧,高频刷新,不写日志避免刷屏)。"""
+        unit = frame.unit or ""
+        vals = "  ".join(f"{name}={v:+6.0f}" for name, v in frame.labeled())
+        self.wheel_var.set(f"四轮转速 [{unit}]: {vals}   (seq={frame.seq})")
+
+    def _show_link_stats(self, stats) -> None:
+        """链路健康度:丢帧率 / CRC 错误 / 垃圾字节。"""
+        self.link_health_var.set(
+            f"反馈链路: 收帧 {stats.frames_ok}  丢帧 {stats.frames_lost} "
+            f"({stats.loss_rate:.1%})  CRC错 {stats.crc_errors}  "
+            f"杂散 {stats.garbage_bytes}B"
+        )
 
     # ------------------------------------------------------------------
     # 异步循环
@@ -298,10 +327,26 @@ class App(tk.Tk):
             row=1, column=0, columnspan=2, sticky="e", pady=4
         )
 
-        # 底部:GATT 信息
-        self.info_var = tk.StringVar(value="GATT: (未连接)")
+        # 底部:四轮速度反馈 + 链路健康度
+        bottom = ttk.Frame(self, padding=(8, 0))
+        bottom.grid(row=2, column=0, sticky="ew")
+        bottom.columnconfigure(0, weight=1)
+
+        self.wheel_var = tk.StringVar(value="四轮速度: (无反馈)")
+        ttk.Label(
+            bottom, textvariable=self.wheel_var,
+            font=("Consolas", 10),
+        ).grid(row=0, column=0, sticky="w", pady=2)
+
+        self.link_health_var = tk.StringVar(value="")
+        ttk.Label(bottom, textvariable=self.link_health_var, foreground=C_SYS).grid(
+            row=1, column=0, sticky="w"
+        )
+
+        # 链路详情(GATT 树 / 串口参数)
+        self.info_var = tk.StringVar(value="(未连接)")
         ttk.Label(self, textvariable=self.info_var, foreground=C_SYS).grid(
-            row=2, column=0, sticky="w", padx=8, pady=4
+            row=3, column=0, sticky="w", padx=8, pady=4
         )
 
     # ------------------------------------------------------------------
@@ -571,6 +616,10 @@ class App(tk.Tk):
                         self.log_rx(line)
                 elif kind == "state":
                     self.log_sys(payload)
+                elif kind == "wheel":
+                    self._show_wheel_frame(payload)
+                elif kind == "stats":
+                    self._show_link_stats(payload)
                 elif kind == "err":
                     self.log_err(payload)
                     self.status_var.set("错误")

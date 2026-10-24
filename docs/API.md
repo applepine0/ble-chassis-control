@@ -96,7 +96,89 @@ t=1.00s  VEL:500,-900,1571     θ_body=-90°  → 世界系方向仍为 0°
 | 参数设置 | `SET:<名>:<数值>\n` | 如 `SET:MAX_SPEED:0.8` |
 | 差速(兼容) | `MOT:<左>,<右>\n` | 百分比 [-100,100] |
 
-### 2.3 回传(MCU → PC,可选)
+### 2.3 ★ 四轮速度反馈(二进制定长帧,11 字节)
+
+```
+字节:  [0]    [1]   [2] [3] [4] [5] [6] [7] [8] [9]   [10]
+内容:  0xAA   seq   w0    w1    w2    w3(各 int16 小端) crc8
+```
+
+| 字段 | 说明 |
+| :--- | :--- |
+| `0xAA` | 帧头(用于在字节流中定位) |
+| `seq` | 序号 0~255 循环,**用于丢帧检测** |
+| `w0..w3` | 四轮转速,int16 小端,**单位 rpm**(缩放 1 → 直接是 rpm 整数) |
+| `crc8` | CRC-8/ATM(多项式 `0x07`,初值 0),覆盖前 10 字节 |
+
+**单位**:`rpm`(缩放 `1.0` → 线上值即 rpm 整数,范围 ±32767 rpm)。
+见 `config.WHEEL_SPEED_SCALE` / `WHEEL_SPEED_UNIT`。
+
+**轮序约定**(俯视,车头朝上,逆时针递增):
+
+| 字段 | 轮位 |
+| :--- | :--- |
+| `w0` | **右前(RF)** |
+| `w1` | 左前(LF) |
+| `w2` | 左后(LR) |
+| `w3` | 右后(RR) |
+
+解码后可用 `frame.labeled()` 得到带轮位名的结果:`[('右前',120.0), ('左前',-250.0), ...]`。
+
+#### 为什么需要 seq
+
+| 字段 | 防的问题 |
+| :--- | :--- |
+| **crc8** | 帧内**比特错误**(误码)→ 检出错帧并丢弃 |
+| **seq** | 整帧**丢失**(缓冲溢出/链路调度)→ 靠序号跳变发现 |
+
+蓝牙 SPP 是**字节流**,HC-06 缓冲溢出会**静默丢弃**数据,写成功 ≠ 对端收到。
+没有 seq 就永远不知道丢了多少帧。上位机据此统计**丢帧率**:
+
+```
+期望 = (last_seq + 1) & 0xFF
+丢失 = (seq - 期望) & 0xFF      ← 掩码减法,正确处理 255→0 回绕
+```
+
+#### 带宽(@115200)
+
+| 频率 | 占用 |
+| ---: | ---: |
+| 50 Hz | 550 B/s(4.8%) |
+| **100 Hz** | **1100 B/s(9.5%)** ← 推荐 |
+| 200 Hz | 2200 B/s(19%) |
+
+#### 与文本行混用
+
+接收侧**两者并行解析**:二进制帧由独立状态机处理(遇 `0xAA` 尝试定长解析,
+CRC 不过则丢弃首字节继续扫描),文本行按 `\n` 分帧。互不干扰。
+
+#### 上层接口
+
+```python
+# 帧回调(收到一帧四轮速度)
+link = SerialBackend("COM15", 115200, on_wheel=lambda f: print(f.seq, f.speeds))
+# 统计回调(丢帧率/CRC 错误,可用于链路健康度显示)
+link = SerialBackend(..., on_stats=lambda s: print(s.loss_rate, s.crc_errors))
+
+# 统计对象
+link.wheel_parser.stats.frames_ok      # 成功帧数
+link.wheel_parser.stats.frames_lost    # 推断丢帧数
+link.wheel_parser.stats.crc_errors     # 校验失败次数
+link.wheel_parser.stats.loss_rate      # 丢帧率
+```
+
+#### 编解码工具(回环测试/MCU 参考)
+
+```python
+from ble_chassis_control.protocol import encode_wheel_frame, decode_wheel_frame, crc8
+
+f = encode_wheel_frame([120.0, -250.0, 0.0, 385.0], seq=7)  # 11 字节(rpm)
+d = decode_wheel_frame(f)                                    # -> WheelFrame 或 None
+d.labeled()          # [('右前',120.0), ('左前',-250.0), ('左后',0.0), ('右后',385.0)]
+crc8(b"123456789")                                           # 0xF4(标准向量)
+```
+
+### 2.4 回传(MCU → PC,文本可选)
 
 | 指令 | 格式 | 说明 |
 | :--- | :--- | :--- |

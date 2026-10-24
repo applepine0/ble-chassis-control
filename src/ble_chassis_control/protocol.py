@@ -23,11 +23,23 @@
     TEL:<键>:<值>[,<键>:<值>...]\\n  遥测,例如 TEL:BAT:7.4,SPD_L:12.3
     其余文本行原样显示(透传日志)。
 
+    ★ 二进制定长帧(四轮速度反馈,方案 B,11 字节):
+        [0]    0xAA            帧头
+        [1]    seq             序号(0~255 循环,用于丢帧检测)
+        [2:10] w0 w1 w2 w3     四轮转速,int16 小端,单位 rpm(缩放见 config)
+        [10]   crc8            校验(多项式 0x07,覆盖 [0..9])
+
+      轮序约定(俯视,车头朝上,逆时针递增):
+        w0 = 右前(RF)  w1 = 左前(LF)  w2 = 左后(LR)  w3 = 右后(RR)
+
+      与文本行**可混用**:接收侧按 0xAA 帧头优先识别,其余按文本行处理。
+
 注意:MCU 端与 PC 端必须使用一致的换行与编码(默认 utf-8)。
 """
 from __future__ import annotations
 
 import re
+import struct
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -42,6 +54,14 @@ TAG_TEL = "TEL"
 
 # 速度范围(百分比,旧 MOT 接口)
 SPEED_MIN, SPEED_MAX = -100.0, 100.0
+
+# ---------------------------------------------------------------------------
+# 二进制四轮速度帧(方案 B)
+# ---------------------------------------------------------------------------
+FRAME_HEAD = 0xAA          # 帧头
+FRAME_LEN = 11             # 帧总长:1+1+8+1
+WHEEL_COUNT = 4            # 轮数
+_WHEEL_FMT = "<4h"         # 4 个 int16 小端
 
 # ---------------------------------------------------------------------------
 # VEL 定点缩放与范围
@@ -214,6 +234,181 @@ class Protocol:
             return msg
 
         return ParsedMessage(raw=line, kind="unknown")
+
+
+# ===========================================================================
+# 二进制四轮速度帧(方案 B,11 字节)
+# ===========================================================================
+
+def crc8(data: bytes, poly: int = 0x07, init: int = 0x00) -> int:
+    """CRC-8/ATM(多项式 0x07)。用于帧完整性校验。
+
+    与 MCU 端实现必须一致;查表法或逐位法结果相同。
+    """
+    crc = init
+    for byte in data:
+        crc ^= byte
+        for _ in range(8):
+            if crc & 0x80:
+                crc = ((crc << 1) ^ poly) & 0xFF
+            else:
+                crc = (crc << 1) & 0xFF
+    return crc
+
+
+@dataclass
+class WheelFrame:
+    """解码后的四轮速度帧。
+
+    轮序(w0~w3,俯视车头朝上逆时针):右前 → 左前 → 左后 → 右后。
+    """
+
+    seq: int                       # 序号(0~255)
+    raw: tuple[int, int, int, int]  # 四轮原始定点整数
+    speeds: tuple[float, float, float, float]  # 换算后的物理量
+    unit: str = ""                 # 单位标识(便于显示)
+
+    def labeled(self) -> list[tuple[str, float]]:
+        """带轮位名称的结果:[('右前', 120.0), ('左前', ...), ...]。"""
+        names = config.WHEEL_NAMES
+        return [(names[i] if i < len(names) else f"w{i}", v)
+                for i, v in enumerate(self.speeds)]
+
+
+def encode_wheel_frame(
+    speeds: tuple[float, float, float, float] | list[float], seq: int = 0
+) -> bytes:
+    """编码四轮速度帧(主要给 MCU 参考 / 上位机做回环测试用)。
+
+    Args:
+        speeds: 四轮转速 rpm,顺序 = 右前,左前,左后,右后
+                (按 config.WHEEL_SPEED_SCALE 缩放为 int16)
+        seq:    序号 0~255
+
+    Returns:
+        11 字节帧:b'\\xaa' + seq + 4×int16(LE) + crc8
+    """
+    if len(speeds) != WHEEL_COUNT:
+        raise ValueError(f"需要 {WHEEL_COUNT} 个轮速,实际 {len(speeds)}")
+    raw = [
+        max(-32768, min(32767, int(round(float(s) * config.WHEEL_SPEED_SCALE))))
+        for s in speeds
+    ]
+    body = bytes([FRAME_HEAD, seq & 0xFF]) + struct.pack(_WHEEL_FMT, *raw)
+    return body + bytes([crc8(body)])
+
+
+def decode_wheel_frame(frame: bytes) -> WheelFrame | None:
+    """解码 11 字节帧;校验失败或长度不符返回 None。"""
+    if len(frame) != FRAME_LEN or frame[0] != FRAME_HEAD:
+        return None
+    if crc8(frame[:-1]) != frame[-1]:
+        return None
+    raw = struct.unpack(_WHEEL_FMT, frame[2:10])
+    speeds = tuple(v / config.WHEEL_SPEED_SCALE for v in raw)
+    return WheelFrame(
+        seq=frame[1],
+        raw=raw,                       # type: ignore[arg-type]
+        speeds=speeds,                 # type: ignore[arg-type]
+        unit=config.WHEEL_SPEED_UNIT,
+    )
+
+
+@dataclass
+class LinkStats:
+    """接收链路统计(丢帧/校验错误),供界面显示链路健康度。"""
+
+    frames_ok: int = 0        # 成功解码帧数
+    crc_errors: int = 0       # 校验失败次数
+    frames_lost: int = 0      # 由 seq 推断的丢帧数
+    garbage_bytes: int = 0    # 无法归类的字节数
+    _last_seq: int | None = None
+
+    def note_ok(self, seq: int) -> int:
+        """记录一帧成功接收,返回本帧新推断出的丢帧数。"""
+        lost = 0
+        if self._last_seq is not None:
+            expected = (self._last_seq + 1) & 0xFF
+            if seq != expected:
+                # 用掩码减法处理 8-bit 回绕(255 -> 0 不算丢 255 帧)
+                lost = (seq - expected) & 0xFF
+        self._last_seq = seq
+        self.frames_ok += 1
+        self.frames_lost += lost
+        return lost
+
+    def reset(self) -> None:
+        self.frames_ok = self.crc_errors = self.frames_lost = self.garbage_bytes = 0
+        self._last_seq = None
+
+    @property
+    def loss_rate(self) -> float:
+        """丢帧率 = 丢失 / (成功 + 丢失)。"""
+        total = self.frames_ok + self.frames_lost
+        return self.frames_lost / total if total else 0.0
+
+
+class WheelFrameParser:
+    """字节流 → 四轮速度帧的状态机解析器。
+
+    与文本行**可混用**:遇到 0xAA 尝试按定长帧解析;
+    校验失败则把该字节当作其它数据(计入 garbage)继续扫描。
+
+    用法::
+
+        parser = WheelFrameParser(on_frame=cb, on_stats=cb2)
+        parser.feed(data)          # 可多次喂入任意长度
+    """
+
+    def __init__(self, on_frame=None, on_stats=None) -> None:
+        from typing import Callable
+
+        self.on_frame: Callable[[WheelFrame], None] | None = on_frame
+        self.on_stats: Callable[[LinkStats], None] | None = on_stats
+        self.stats = LinkStats()
+        self._buf = bytearray()
+
+    def feed(self, data: bytes) -> None:
+        """喂入字节;内部缓存并尽量切出完整帧。"""
+        self._buf += data
+        while self._buf:
+            # 1) 找帧头
+            if self._buf[0] != FRAME_HEAD:
+                idx = self._buf.find(bytes([FRAME_HEAD]))
+                if idx < 0:
+                    self.stats.garbage_bytes += len(self._buf)
+                    self._buf.clear()
+                    self._maybe_report()
+                    return
+                self.stats.garbage_bytes += idx
+                del self._buf[:idx]
+
+            # 2) 等够整帧
+            if len(self._buf) < FRAME_LEN:
+                return
+
+            # 3) 尝试解码
+            candidate = bytes(self._buf[:FRAME_LEN])
+            frame = decode_wheel_frame(candidate)
+            if frame is None:
+                # 校验失败:丢弃首字节(可能是数据里的 0xAA),继续扫描
+                self.stats.crc_errors += 1
+                del self._buf[:1]
+                self._maybe_report()
+                continue
+
+            # 4) 成功
+            del self._buf[:FRAME_LEN]
+            lost = self.stats.note_ok(frame.seq)
+            if loss := lost:
+                self._maybe_report(force=True)
+            if self.on_frame:
+                self.on_frame(frame)
+            self._maybe_report()
+
+    def _maybe_report(self, force: bool = False) -> None:
+        if self.on_stats:
+            self.on_stats(self.stats)
 
 
 def decode_line(data: bytes) -> str:

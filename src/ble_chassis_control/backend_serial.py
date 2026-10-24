@@ -69,8 +69,12 @@ class SerialBackend(ChassisLink):
         *,
         on_line: OnLineCallback | None = None,
         on_state: OnStateCallback | None = None,
+        on_wheel=None,
+        on_stats=None,
     ) -> None:
-        super().__init__(on_line=on_line, on_state=on_state)
+        super().__init__(
+            on_line=on_line, on_state=on_state, on_wheel=on_wheel, on_stats=on_stats
+        )
         self.port = port or config.SERIAL_PORT
         self.baudrate = int(baudrate or config.SERIAL_BAUDRATE)
         self._ser: Optional["serial.Serial"] = None

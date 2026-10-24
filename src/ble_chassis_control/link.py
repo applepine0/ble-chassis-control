@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from .protocol import ParsedMessage
 
@@ -46,6 +46,8 @@ class ChassisLink(ABC):
         *,
         on_line: OnLineCallback | None = None,
         on_state: OnStateCallback | None = None,
+        on_wheel: "Callable[[Any], None] | None" = None,
+        on_stats: "Callable[[Any], None] | None" = None,
     ) -> None:
         self._on_line = on_line
         self._on_state = on_state
@@ -54,6 +56,10 @@ class ChassisLink(ABC):
         self.mtu: int = 0              # BLE 有值;串口后端为 0
         self.last_error: str = ""
         self._rx_buffer = b""
+        # 二进制帧解析(四轮速度反馈)+ 丢帧统计
+        from .protocol import WheelFrameParser
+
+        self.wheel_parser = WheelFrameParser(on_frame=on_wheel, on_stats=on_stats)
 
     # ------------------------------------------------------------------
     # 状态与回调
@@ -87,10 +93,19 @@ class ChassisLink(ABC):
                 logger.exception("on_line 回调异常")
 
     def _feed_bytes(self, data: bytes) -> None:
-        """按换行分帧;供各后端在收到数据时调用。"""
+        """接收处理:二进制帧优先识别,其余按换行分帧为文本行。
+
+        混用策略:先把数据喂给二进制帧解析器(它只吃 0xAA 开头的定长帧),
+        同时按换行切分文本。两者互不干扰 —— 因为文本行是 ASCII,
+        不含 0xAA 帧头,而帧内也可能出现 0x0A 字节,故先做帧解析。
+        """
         from . import config
         from .protocol import decode_line
 
+        # 1) 二进制帧(四轮速度)—— 独立缓存,不影响文本分帧
+        self.wheel_parser.feed(data)
+
+        # 2) 文本行
         delim = config.LINE_END.encode(config.ENCODING)
         self._rx_buffer += data
         while delim in self._rx_buffer:

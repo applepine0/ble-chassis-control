@@ -37,6 +37,8 @@ uv run python -m ble_chassis_control
 | SET 命令 | 通用参数下发,如 `SET:MAX_SPEED:0.8` |
 | 手动发送 | 任意透传文本行发送(自动补 `\n`) |
 | 通信日志 | TX/RX 分色显示、带时间戳、自动滚动、可清空 |
+| **四轮速度反馈** | 解析 11B 二进制帧并显示四轮实测转速(**rpm**,带轮位名) |
+| **链路健康度** | 丢帧数/丢帧率、CRC 错误、杂散字节(seq 推断) |
 | 链路详情 | 串口:端口 + 波特率参数;BLE:GATT 服务树 |
 
 ## 通信协议(文本行 + 定点整数,以 `\n` 结尾)
@@ -85,6 +87,30 @@ VEL:<v_mmps>,<deg_tenths>,<omega_mradps>
 | 遥测 | `TEL:<键>:<值>[,<键>:<值>...]\n` | 如 `TEL:BAT:7.4,SPD_L:12.3`,界面结构化显示 |
 | 其他 | 任意文本行 | 原样显示在日志 |
 
+### ★ 四轮速度反馈(二进制定长帧,11 字节)
+
+```
+[0]=0xAA  [1]=seq  [2:10]=4×int16 小端(转速)  [10]=crc8(0x07)
+```
+
+**轮序约定**(俯视,车头朝上,逆时针递增):
+`w0=右前` → `w1=左前` → `w2=左后` → `w3=右后`
+
+- **seq**:序号循环,上位机据此统计**丢帧率**(蓝牙字节流无消息边界,丢帧只能靠序号发现);
+- **crc8**:CRC-8/ATM(多项式 0x07),拒绝误码帧;
+- **单位 rpm**(缩放 1,即线上值就是 rpm 整数;见 `config.WHEEL_SPEED_SCALE`);
+- 与文本行**可混用**:接收侧并行解析,互不干扰;
+- 带宽:@115200 下 100Hz 仅占 9.5%。
+
+```python
+link = SerialBackend("COM15", 115200,
+                     on_wheel=lambda f: print(f.speeds),      # 四轮速度帧
+                     on_stats=lambda s: print(s.loss_rate))   # 丢帧率
+```
+
+**MCU 端参考实现**:`tools/mcu/chassis_protocol.c` 的 `proto_send_wheel_frame()`
+(已用 gcc 与 Python 端逐字节比对一致)。
+
 编码默认 utf-8;协议定义集中在 `src/ble_chassis_control/protocol.py`。
 
 ### ⚠️ MCU 端实现要点
@@ -110,7 +136,7 @@ VEL:<v_mmps>,<deg_tenths>,<omega_mradps>
 ```
 src/ble_chassis_control/
 ├── config.py          # 链路选择 / 串口参数 / 地址 / UUID / 超时重试 / UI 范围
-├── protocol.py        # 协议:VEL(主)/MOT(兼容)/STOP/SET 编码 + TEL 解析
+├── protocol.py        # 协议:VEL 编码 + TEL/二进制帧解析(CRC8/seq 丢帧统计)
 ├── motion.py          # 定频运动下发:θ(t)=θ₀+SIGN·∫ω·dt(SIGN=-1 世界系定向)
 ├── link.py            # 链路抽象基类 ChassisLink(统一 BLE 与串口的接口)
 ├── backend.py         # BLE 后端(Bleak):扫描→连接→UUID 自动解析→收发
@@ -210,6 +236,7 @@ uv run python tools/ble_probe12.py       # 同会话内 4 次反复枚举(排除
 uv run python tests/test_smoke.py        # 协议/后端/GUI 冒烟(不连硬件)
 uv run python tests/test_gui_flow.py     # GUI 功能测试:模拟后端跑通连接/发送/回传/显示
 uv run python tests/test_motion.py       # MotionRunner 测试:θ 累积/世界系定向/定频(10 项)
+uv run python tests/test_wheel_frame.py  # 四轮速度帧:CRC/丢帧/回绕/混流(10 项)
 uv run python tests/test_serial_backend.py  # 串口后端功能测试(6 项,含只下发模式)
 ```
 

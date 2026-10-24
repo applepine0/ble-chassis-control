@@ -233,3 +233,79 @@ void proto_send_telemetry_raw(int32_t v_mmps, int32_t deg_tenths, int32_t omega_
  *       // ... 上述逆解,逐轮设定舵角与转速 ...
  *   }
  * ========================================================================== */
+
+/* ==========================================================================
+ * 四轮速度反馈:二进制定长帧(方案 B,11 字节)
+ * --------------------------------------------------------------------------
+ * 帧格式(与上位机 protocol.py 严格一致):
+ *
+ *   [0]     0xAA                 帧头
+ *   [1]     seq                  序号 0~255 循环递增(上位机据此检测丢帧)
+ *   [2:10]  w0 w1 w2 w3          四轮转速,int16 小端,单位 rpm(整数)
+ *   [10]    crc8                 CRC-8/ATM(多项式 0x07),覆盖 [0..9]
+ *
+ * 轮序约定(俯视,车头朝上,逆时针递增):
+ *   w0 = 右前(RF)   w1 = 左前(LF)   w2 = 左后(LR)   w3 = 右后(RR)
+ *
+ * 带宽:@115200 下 11B × 100Hz = 1100 B/s,仅占约 9.5%。
+ * ========================================================================== */
+
+#define WHEEL_CNT       4
+#define WHEEL_SPEED_K   1.0f      /* rpm -> 线上整数(与上位机 WHEEL_SPEED_SCALE 一致) */
+
+static uint8_t s_wheel_seq = 0;
+
+/* CRC-8/ATM(多项式 0x07,初值 0x00)—— 必须与上位机 crc8() 一致 */
+static uint8_t proto_crc8(const uint8_t *data, uint16_t len)
+{
+    uint8_t crc = 0x00;
+    for (uint16_t i = 0; i < len; i++) {
+        crc ^= data[i];
+        for (uint8_t b = 0; b < 8; b++) {
+            crc = (crc & 0x80) ? (uint8_t)((crc << 1) ^ 0x07) : (uint8_t)(crc << 1);
+        }
+    }
+    return crc;
+}
+
+/* 小端写入 int16 */
+static void proto_put_i16le(uint8_t *p, int16_t v)
+{
+    p[0] = (uint8_t)(v & 0xFF);
+    p[1] = (uint8_t)((v >> 8) & 0xFF);
+}
+
+/* 发送一帧四轮速度(单位:rpm)
+ *   wheel_rpm[0..3] = 右前,左前,左后,右后 的实测转速(rpm)
+ *   依赖外部提供 UART 原始发送:proto_uart_send(buf, len)
+ */
+void proto_send_wheel_frame(const float wheel_rpm[WHEEL_CNT])
+{
+    uint8_t buf[11];
+
+    buf[0] = 0xAA;
+    buf[1] = s_wheel_seq++;
+
+    for (int i = 0; i < WHEEL_CNT; i++) {
+        float scaled = wheel_rpm[i] * WHEEL_SPEED_K;
+        /* 钳位到 int16,避免溢出 */
+        if (scaled >  32767.0f) scaled =  32767.0f;
+        if (scaled < -32768.0f) scaled = -32768.0f;
+        proto_put_i16le(&buf[2 + i * 2], (int16_t)scaled);
+    }
+
+    buf[10] = proto_crc8(buf, 10);
+
+    proto_uart_send(buf, sizeof(buf));
+}
+
+/* 使用示例(建议由定时器/控制周期调用,例如 100Hz):
+ *
+ *   // 在控制循环(如 1kHz)中分频到 100Hz:
+ *   static uint32_t last_fb_ms = 0;
+ *   if (HAL_GetTick() - last_fb_ms >= 10) {       // 10ms -> 100Hz
+ *       last_fb_ms = HAL_GetTick();
+ *       float w[4] = { rpm_RF, rpm_LF, rpm_LR, rpm_RR };   // 右前,左前,左后,右后
+ *       proto_send_wheel_frame(w);
+ *   }
+ */

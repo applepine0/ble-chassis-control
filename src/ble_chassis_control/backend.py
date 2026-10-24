@@ -35,8 +35,12 @@ class BLEBackend(ChassisLink):
         *,
         on_line: OnLineCallback | None = None,
         on_state: OnStateCallback | None = None,
+        on_wheel=None,
+        on_stats=None,
     ) -> None:
-        super().__init__(on_line=on_line, on_state=on_state)
+        super().__init__(
+            on_line=on_line, on_state=on_state, on_wheel=on_wheel, on_stats=on_stats
+        )
         self.address = (address or config.DEVICE_ADDRESS).upper()
         self._client: Optional[BleakClient] = None
         self._write_char: Optional[BleakGATTCharacteristic] = None
