@@ -123,6 +123,15 @@ link = SerialBackend("COM15", 115200,
 - 波特率与模块/MCU 一致(**当前 115200**;HC-06 默认 9600,可用 `AT+BAUD8` 改);
 - `v` 为标量大小,负值非法(上位机已钳为 0)。
 
+## 文档导航
+
+| 文档 | 内容 | 适合谁看 |
+| :--- | :--- | :--- |
+| **本文(README)** | 快速上手、协议、硬件诊断结论 | 所有人 |
+| **[`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)** | **开发交接**:当前状态/待办、设计决策与原因、踩坑史、线程模型 | **接手开发者 / 新 AI 会话** |
+| [`docs/API.md`](docs/API.md) | 完整接口文档(14 章) | 调用 API 的人 |
+| [`tools/mcu/chassis_protocol.c`](tools/mcu/chassis_protocol.c) | MCU 端参考实现 | 嵌入式同事 |
+
 ## 接口文档
 
 完整 API 文档见 **[`docs/API.md`](docs/API.md)**,包含:
