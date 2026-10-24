@@ -21,7 +21,7 @@ from .backend_serial import SerialBackend, available_ports
 from .chart import WheelChart
 from .link import ChassisLink, LinkError
 from .motion import MotionRunner
-from .protocol import ParsedMessage
+from .protocol import ParsedMessage, Protocol
 
 # 界面配色
 C_SYS = "#808080"
@@ -289,25 +289,35 @@ class App(tk.Tk):
 
         ttk.Separator(ctrl).grid(row=6, column=0, columnspan=3, sticky="ew", pady=6)
 
-        # 通用 SET 命令
+        # 通用 SET 命令(方案 A:物理值 → ×scale 整数)
         ttk.Label(ctrl, text="SET 命令:").grid(row=7, column=0, sticky="w")
-        self.set_name = ttk.Entry(ctrl, width=10)
+        self.set_name = ttk.Combobox(
+            ctrl, values=list(config.SET_PARAMS), width=10,
+        )
         self.set_name.grid(row=7, column=1, sticky="ew", padx=6)
-        self.set_name.insert(0, "MAX_SPEED")
+        self.set_name.set("MAX_SPEED")
         self.set_val = ttk.Entry(ctrl, width=8)
         self.set_val.grid(row=7, column=2)
         self.set_val.insert(0, "0.8")
+        self.set_hint_var = tk.StringVar(value="")
+        ttk.Label(
+            ctrl, textvariable=self.set_hint_var, foreground=C_SYS, font=("", 8),
+        ).grid(row=8, column=0, columnspan=3, sticky="w")
+        self.set_name.bind("<<ComboboxSelected>>", lambda _e: self._update_set_hint())
+        self.set_name.bind("<KeyRelease>", lambda _e: self._update_set_hint())
+        self.set_val.bind("<KeyRelease>", lambda _e: self._update_set_hint())
         self.btn_set = ttk.Button(ctrl, text="发送 SET", command=self.on_send_set)
-        self.btn_set.grid(row=8, column=0, columnspan=3, sticky="ew", pady=8)
+        self.btn_set.grid(row=9, column=0, columnspan=3, sticky="ew", pady=(6, 8))
 
         # 手动透传行
-        ttk.Label(ctrl, text="手动发送:").grid(row=9, column=0, sticky="w")
+        ttk.Label(ctrl, text="手动发送:").grid(row=10, column=0, sticky="w")
         self.raw_var = tk.StringVar()
         ttk.Entry(ctrl, textvariable=self.raw_var).grid(
-            row=9, column=1, columnspan=2, sticky="ew", padx=6
+            row=10, column=1, columnspan=2, sticky="ew", padx=6
         )
         self.btn_raw = ttk.Button(ctrl, text="发送", command=self.on_send_raw)
-        self.btn_raw.grid(row=10, column=0, columnspan=3, sticky="ew", pady=8)
+        self.btn_raw.grid(row=11, column=0, columnspan=3, sticky="ew", pady=8)
+        self._update_set_hint()
 
         # 右侧:日志 + 转速曲线
         right = ttk.Frame(mid)
@@ -409,6 +419,25 @@ class App(tk.Tk):
         # 滑块拖动时不下发,避免刷屏;仅同步显示
         pass
 
+    def _update_set_hint(self) -> None:
+        """按参数名/当前输入显示单位、缩放与线上整数预览。"""
+        name = self.set_name.get().strip()
+        if not name:
+            self.set_hint_var.set("请输入参数名(未登记参数按 ×1 发送)")
+            return
+        scale, unit, desc = config.set_param(name)
+        try:
+            value = float(self.set_val.get())
+        except ValueError:
+            value = None
+        if value is None:
+            suffix = f"单位 {unit}," if unit else ""
+            self.set_hint_var.set(f"{desc}: {suffix}缩放 ×{scale}")
+            return
+        raw = int(round(value * scale))
+        shown = f"{value:g}" + (f" {unit}" if unit else "")
+        self.set_hint_var.set(f"{desc}: {shown} ×{scale} → 线上 {raw}")
+
     def on_connect(self) -> None:
         # 防护:已连接 / 连接中时忽略重复点击,避免二次打开串口自锁
         if self.backend.is_connected:
@@ -443,20 +472,50 @@ class App(tk.Tk):
     def on_disconnect(self) -> None:
         if self.motion is not None and self.motion.is_running:
             self.motion.stop()
-            self.log_sys("断开前:已终止运动下发")
+            self.log_sys("断开前:已终止运动下发,等待 STOP 下发 ...")
+            self.btn_disc.configure(state="disabled")
+            self.status_var.set("断开中 ...")
+            self._submit(
+                self._disconnect_after_motion(),
+                on_success=lambda _r: self._set_disconnected(),
+                on_error=lambda err: (self.log_err(err), self._set_disconnected()),
+            )
+            return
         self._submit(self.backend.disconnect())
         self._set_disconnected()
 
+    async def _disconnect_after_motion(self) -> None:
+        """先等运动协程退出(其内部会发 STOP),再关闭链路。"""
+        motion = self.motion
+        if motion is not None:
+            for _ in range(30):                 # 最多等 3 秒
+                if not motion.is_running:
+                    break
+                await asyncio.sleep(0.1)
+        await self.backend.disconnect()
+
     def _rebuild_link(self) -> None:
-        """切换链路类型:先停运动、断开旧链路,再创建新的。"""
+        """切换链路类型:先停运动、等 STOP 发出,再断开旧链路并创建新的。"""
+        old = self.backend
         if self.motion is not None and self.motion.is_running:
             self.motion.stop()
-        old = self.backend
-        if old.is_connected:
+            self.log_sys("切换链路前:已终止运动下发,等待 STOP 下发 ...")
+            self._submit(self._disconnect_old_after_motion(old))
+        elif old.is_connected:
             self._submit(old.disconnect())
         self.backend = self._make_link(self.link_kind.get())
         self.log_sys(f"链路已切换为:{'BLE' if self.link_kind.get() == 'ble' else '串口'}")
         self._sync_target_field()
+
+    async def _disconnect_old_after_motion(self, old: ChassisLink) -> None:
+        """切换链路时:等旧链路上的运动协程发出 STOP,再断开旧链路。"""
+        motion = self.motion
+        if motion is not None:
+            for _ in range(30):                 # 最多等 3 秒
+                if not motion.is_running:
+                    break
+                await asyncio.sleep(0.1)
+        await old.disconnect()
 
     def on_self_check(self) -> None:
         """一键自检:串口列出可用口;BLE 扫描目标模块广播。"""
@@ -596,13 +655,19 @@ class App(tk.Tk):
 
     def on_send_set(self) -> None:
         name = self.set_name.get().strip()
+        if not name:
+            messagebox.showwarning("输入错误", "SET 参数名不能为空")
+            return
         try:
             value = float(self.set_val.get())
         except ValueError:
             messagebox.showwarning("输入错误", "SET 数值必须是数字")
             return
-        self.log_tx(f"SET {name}={value:g}")
-        self._submit(self.backend.send_set(name, value))
+        scale, unit, _ = config.set_param(name)
+        cmd = Protocol.encode_set(name, value, scale=scale).decode("utf-8").strip()
+        shown = f"{value:g}" + (f" {unit}" if unit else "")
+        self.log_tx(f"SET {name} = {shown} → {cmd} (×{scale})")
+        self._submit(self.backend.send_set(name, value, scale=scale))
 
     def on_send_raw(self) -> None:
         text = self.raw_var.get()

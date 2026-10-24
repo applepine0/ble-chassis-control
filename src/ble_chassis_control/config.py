@@ -60,6 +60,7 @@ ADDRESS_TYPE = "public"      # 已验证:JDY-23 在 Windows 缓存中为 public(
 WRITE_TIMEOUT = 5.0          # 单次写入超时(秒)
 WRITE_WITH_RESPONSE = None   # None=自动(优先 W/O response,失败回退);True/False 强制
 RECONNECT_ON_DROP = True     # 意外断开后是否自动重连
+RECONNECT_DELAY = 5.0        # 掉线后重连等待(秒);失败则按此间隔继续重试
 
 # ---------------------------------------------------------------------------
 # 协议 / 界面
@@ -67,6 +68,32 @@ RECONNECT_ON_DROP = True     # 意外断开后是否自动重连
 ENCODING = "utf-8"
 # 收到以 "\\n" 结尾的行即视为一条完整消息;透传模式下与串口端约定一致
 LINE_END = "\n"
+
+# --- SET 参数缩放(方案 A:线上整数,按参数缩放)-------------------------
+# 上位机输入物理值(如 0.8 m/s),编码时 ×scale 取整为整数;
+# MCU 端按同一张表除以 scale 还原物理量,不需要浮点解析。
+# 未登记的参数按 ×1(纯整数)发送;扩展参数只需在这里加一行。
+SET_PARAMS = {
+    "MAX_SPEED": {"scale": 1000, "unit": "m/s", "desc": "最大线速度"},
+    "MAX_OMEGA": {"scale": 1000, "unit": "rad/s", "desc": "最大自转角速度"},
+}
+SET_DEFAULT_SCALE = 1
+SET_DEFAULT_UNIT = ""
+SET_DEFAULT_DESC = "未登记参数(按整数发送)"
+
+
+def set_param(name: str) -> tuple[int, str, str]:
+    """返回 (缩放, 单位, 说明);未登记参数回退到 ×1。"""
+    info = SET_PARAMS.get(str(name).strip().upper())
+    if not info:
+        return SET_DEFAULT_SCALE, SET_DEFAULT_UNIT, SET_DEFAULT_DESC
+    return int(info["scale"]), str(info["unit"]), str(info["desc"])
+
+
+def set_scale(name: str) -> int:
+    """参数名 → 线上缩放系数。"""
+    return set_param(name)[0]
+
 
 # --- 速度矢量指令(VEL)的 UI 范围 ----------------------------------------
 # 协议层不额外设限(仅 int16 定点钳位,见 protocol.py);此处只约束界面控件范围。

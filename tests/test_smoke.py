@@ -43,7 +43,11 @@ def test_protocol() -> None:
     mot = Protocol.encode_mot(25.0, -30.5)
     assert mot == b"MOT:25,-30.5\n", mot
     assert Protocol.encode_stop() == b"STOP\n"
-    assert Protocol.encode_set("MAX_SPEED", 0.8) == b"SET:MAX_SPEED:0.8\n"
+    # SET 方案 A:物理值 × 参数缩放 → 线上整数
+    assert Protocol.encode_set("MAX_SPEED", 0.8) == b"SET:MAX_SPEED:800\n"
+    assert Protocol.encode_set("MAX_OMEGA", -1.57) == b"SET:MAX_OMEGA:-1570\n"
+    assert Protocol.encode_set("MAX_SPEED", 0.8, scale=100) == b"SET:MAX_SPEED:80\n"
+    assert Protocol.encode_set("CUSTOM", 3) == b"SET:CUSTOM:3\n"
     assert Protocol.encode_raw("hi") == b"hi\n"
     assert Protocol.encode_raw("hi\n") == b"hi\n"
 
@@ -68,7 +72,6 @@ def test_protocol() -> None:
     backend = BLEBackend()
     lines: list[tuple[str, ParsedMessage]] = []
     backend._on_line = lambda line, parsed: lines.append((line, parsed))
-    backend._rx_buffer = b""
     backend._on_notify(None, bytearray(b"IND:0\r"))
     assert lines == [], "未到换行不应分发"
     backend._on_notify(None, bytearray(b"\nmore\n"))

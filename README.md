@@ -34,7 +34,7 @@ uv run python -m ble_chassis_control
 | 连接/断开/自检 | 串口自检 = 列出可用串口;BLE 自检 = 扫描目标广播信息 |
 | 底盘控制 | 速度 m/s / 方向 deg / 自转 rad/s 三控件、发送一次、急停 |
 | **旋转前进(定频下发)** | **启动运动/停止运动** + 频率设置;按 `θ(t)=θ₀−∫ω·dt` 反向补偿车体自转,使**世界系方向恒定** |
-| SET 命令 | 通用参数下发,如 `SET:MAX_SPEED:0.8` |
+| SET 命令 | 通用参数下发(整数 + 参数缩放),如 `SET:MAX_SPEED:800` |
 | 手动发送 | 任意透传文本行发送(自动补 `\n`) |
 | 通信日志 | TX/RX 分色显示、带时间戳、自动滚动、可清空 |
 | **四轮速度反馈** | 解析 11B 二进制帧并显示四轮实测转速(**rpm**,带轮位名) |
@@ -64,11 +64,22 @@ VEL:<v_mmps>,<deg_tenths>,<omega_mradps>
 | `VEL:0,0,1570` | 原地以 1.570 rad/s 自转 |
 | `VEL:800,450,-500` | 0.8 m/s 朝 45.0°,同时 -0.5 rad/s 自转 |
 | `STOP` | 急停(三量归零,短帧优先) |
-| `SET:<参数名>:<数值>` | 通用参数,如 `SET:MAX_SPEED:0.8` |
+| `SET:<参数名>:<整数>` | 通用参数,按参数缩放,如 `SET:MAX_SPEED:800` |
+
+**SET 参数缩放(方案 A:线上整数)**
+
+| 参数 | 物理单位 | 缩放 | 示例 |
+| :--- | :--- | ---: | :--- |
+| `MAX_SPEED` | m/s | ×1000 | 0.8 m/s → `SET:MAX_SPEED:800` |
+| `MAX_OMEGA` | rad/s | ×1000 | 1.57 rad/s → `SET:MAX_OMEGA:1570` |
+| 未登记参数 | — | ×1 | `SET:FOO:3` |
+
+> GUI 会显示参数单位与缩放并自动取整;MCU 端按同一张表除以 `scale` 还原物理量。
+> 扩展参数只需改 `config.SET_PARAMS`,协议无需变更。
 
 **设计要点**
 
-- **全整数定点**:MCU 端零浮点解析(`atoi`/手写整数),无浮点库依赖;
+- **全整数定点**:VEL 与 SET 的线上值均为整数;MCU 端零浮点解析(`atoi`/手写整数),无浮点库依赖;
 - **精度**:1 mm/s、0.1°、0.001 rad/s;
 - **协议中立**:不涉及参考系(车头/世界)、正方向、底盘类型(舵轮/麦轮/差速)——
   这些属于 **MCU 侧运动学语义**,由 MCU 做逆解,上位机只表达"意图";
@@ -100,7 +111,7 @@ VEL:<v_mmps>,<deg_tenths>,<omega_mradps>
 - **seq**:序号循环,上位机据此统计**丢帧率**(蓝牙字节流无消息边界,丢帧只能靠序号发现);
 - **crc8**:CRC-8/ATM(多项式 0x07),拒绝误码帧;
 - **单位 rpm**(缩放 1,即线上值就是 rpm 整数;见 `config.WHEEL_SPEED_SCALE`);
-- 与文本行**设计上可混用**:接收侧并行解析;⚠️ 当前实现存在混流缺陷,见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) 的“已知问题”;
+- 与文本行**可混用**:接收侧由 `StreamDemux` 统一解复用(帧优先),帧内 `0x0A` 不再污染文本行;
 - 带宽:@115200 下 100Hz 仅占 9.5%。
 
 ```python
@@ -117,6 +128,8 @@ link = SerialBackend("COM15", 115200,
 - 每条指令以 `\n` 结尾作为分帧依据;
 - 收到 `VEL:` 后:**除以缩放系数还原物理量**
   (`v/1000.0` m/s、`deg/10.0`、`omega/1000.0` rad/s),再做舵轮逆解;
+- `SET:` 的值是**整数**,按参数缩放(如 `MAX_SPEED` ×1000);固件解析后除以
+  `scale` 还原物理量(`0.8 m/s → 800`);
 - 波特率与模块/MCU 一致(**当前 115200**;HC-06 默认 9600,可用 `AT+BAUD8` 改);
 - `v` 为标量大小,负值非法(上位机已钳为 0)。
 
@@ -141,8 +154,8 @@ link = SerialBackend("COM15", 115200,
 
 ```
 src/ble_chassis_control/
-├── config.py          # 链路选择 / 串口参数 / 地址 / UUID / 超时重试 / UI 范围
-├── protocol.py        # 协议:VEL 编码 + TEL/二进制帧解析(CRC8/seq 丢帧统计)
+├── config.py          # 链路选择 / 串口参数 / SET 缩放表 / 地址 / UUID / 超时重试 / UI 范围
+├── protocol.py        # 协议 + StreamDemux:VEL 编码 / TEL / 二进制帧(CRC8/seq 丢帧统计)
 ├── motion.py          # 定频运动下发:θ(t)=θ₀+SIGN·∫ω·dt(SIGN=-1 世界系定向)
 ├── chart.py           # 四轮转速实时曲线(纯 Canvas,环形缓冲 + 节流重绘)
 ├── link.py            # 链路抽象基类 ChassisLink(统一 BLE 与串口的接口)
@@ -241,10 +254,10 @@ uv run python tools/ble_probe10.py       # 热连接:捕获广播瞬间立即连
 uv run python tools/ble_probe11.py       # GATT 冲刷:8 次短会话密集枚举(排除偶发可用)
 uv run python tools/ble_probe12.py       # 同会话内 4 次反复枚举(排除会话内重试路径)
 uv run python tests/test_smoke.py        # 协议/后端/GUI 冒烟(不连硬件)
-uv run python tests/test_gui_flow.py     # GUI 功能测试:模拟后端跑通连接/发送/回传/显示
+uv run python tests/test_gui_flow.py     # GUI 功能测试:模拟后端 11 条路径(含 SET 缩放/运动中断开)
 uv run python tests/test_motion.py       # MotionRunner 测试:θ 累积/世界系定向/定频(10 项)
-uv run python tests/test_wheel_frame.py  # 四轮速度帧:CRC/丢帧/回绕/混流(10 项)
-uv run python tests/test_chart.py        # 曲线图:环形缓冲/量程/绘制(6 项)
+uv run python tests/test_wheel_frame.py  # 四轮速度帧:CRC/丢帧/回绕/混流(14 项)
+uv run python tests/test_chart.py        # 曲线图:环形缓冲/量程/绘制(7 项)
 uv run python tests/test_serial_backend.py  # 串口后端功能测试(6 项,含只下发模式)
 ```
 

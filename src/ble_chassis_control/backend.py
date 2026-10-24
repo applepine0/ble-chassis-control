@@ -122,7 +122,7 @@ class BLEBackend(ChassisLink):
         self._resolve_characteristics(client)
 
         # 4) 订阅通知,开始组帧回传
-        self._rx_buffer = b""
+        self.wheel_parser.reset()
         if self._notify_char is not None:
             await client.start_notify(self._notify_char, self._on_notify)
         else:

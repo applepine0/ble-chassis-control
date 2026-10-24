@@ -94,8 +94,19 @@ t=1.00s  VEL:500,-900,1571     θ_body=-90°  → 世界系方向仍为 0°
 | 指令 | 格式 | 说明 |
 | :--- | :--- | :--- |
 | 急停 | `STOP\n` | 三量归零(短帧,优先响应) |
-| 参数设置 | `SET:<名>:<数值>\n` | 如 `SET:MAX_SPEED:0.8` |
+| 参数设置 | `SET:<名>:<整数>\n` | 按参数缩放,如 `SET:MAX_SPEED:800` |
 | 差速(兼容) | `MOT:<左>,<右>\n` | 百分比 [-100,100] |
+
+**SET 缩放表(方案 A:线上整数)**
+
+| 参数 | 物理单位 | 缩放 | 示例 |
+| :--- | :--- | ---: | :--- |
+| `MAX_SPEED` | m/s | ×1000 | 0.8 m/s → `SET:MAX_SPEED:800` |
+| `MAX_OMEGA` | rad/s | ×1000 | 1.57 rad/s → `SET:MAX_OMEGA:1570` |
+| 未登记参数 | — | ×1 | `SET:FOO:3` |
+
+> 缩放表在 `config.SET_PARAMS`;MCU 端按同一张表除以 `scale` 还原物理量。
+> GUI 会显示单位/缩放并自动取整,扩展参数无需改协议。
 
 ### 2.3 ★ 四轮速度反馈(二进制定长帧,11 字节)
 
@@ -150,12 +161,9 @@ t=1.00s  VEL:500,-900,1571     θ_body=-90°  → 世界系方向仍为 0°
 
 #### 与文本行混用
 
-接收侧**两者并行解析**:二进制帧由独立状态机处理(遇 `0xAA` 尝试定长解析,
-CRC 不过则丢弃首字节继续扫描),文本行按 `\n` 分帧。
-
-> ⚠️ **已知限制**:当前接收层把同一份字节同时交给帧解析器与文本分帧器,
-> 帧内字节可能污染文本行(实测 100Hz 反馈 + `TEL` 混流时 `TEL` 解析失败)。
-> 修复方向见 [`DEVELOPMENT.md`](DEVELOPMENT.md) 的“已知问题”。
+接收侧由 `StreamDemux` **统一解复用**:缓冲以 `0xAA` 开头且凑够 11B 时优先按帧解析,
+成功则整帧消费;其余字节按 `\n` 分帧为文本行。帧内出现 `0x0A` 也不会切错文本行,
+正常文本字节也不会被计入“杂散”。
 
 #### 上层接口
 
@@ -214,8 +222,18 @@ b'VEL:500,900,0\n'
 ```python
 Protocol.encode_stop() -> bytes                         # b'STOP\n'
 Protocol.encode_mot(left: float, right: float) -> bytes  # 兼容接口
-Protocol.encode_set(name: str, value: float) -> bytes
+Protocol.encode_set(name: str, value: float, scale: int | None = None) -> bytes
 Protocol.encode_raw(text: str) -> bytes                 # 自动补 \n
+```
+
+`encode_set` 为方案 A:物理值 × `scale` 四舍五入为整数。`scale=None` 时按
+`config.SET_PARAMS` 查表(未登记参数按 ×1)。
+
+```python
+>>> Protocol.encode_set("MAX_SPEED", 0.8)
+b'SET:MAX_SPEED:800\n'
+>>> Protocol.encode_set("MAX_SPEED", 0.8, scale=100)
+b'SET:MAX_SPEED:80\n'
 ```
 
 ### 3.2 解析函数
@@ -242,9 +260,12 @@ class ParsedMessage:
 | :--- | :--- |
 | `vel` | `speed_mps: float`、`deg: float`、`omega_radps: float`、`raw_int: tuple[int,int,int]` |
 | `mot` | `left: float`、`right: float` |
-| `set` | `name: str`、`value: float` |
+| `set` | `name: str`、`value: float`(线上整数,未还原 scale) |
 | `tel` | `values: dict[str, float]` |
 | `stop` | (无) |
+
+> `SET` 的 `value` 是线上整数(如 800),未按 `scale` 还原成物理值;
+> 还原由调用方/固件按 `config.SET_PARAMS` 完成。
 
 ```python
 >>> m = Protocol.parse_line("VEL:500,900,0")
@@ -261,6 +282,22 @@ class ParsedMessage:
 | `SPEED_MIN/MAX` | -100 / 100 | 旧 MOT 百分比范围 |
 | `decode_line(data: bytes) -> str` | — | utf-8 → gbk → latin-1 兜底解码 |
 
+### 3.4 `StreamDemux` — 字节流解复用
+
+```python
+StreamDemux(on_frame=None, on_stats=None, on_text=None)
+demux.feed(data: bytes) -> None
+demux.reset(*, clear_stats: bool = True) -> None
+demux.stats  # LinkStats
+```
+
+- `on_frame(frame: WheelFrame)`:收到完整四轮速度帧;
+- `on_text(text: str)`:收到一整行文本(已解码);
+- **帧优先**:`0xAA` 且凑够 11B 先尝试帧;CRC 失败整帧丢弃并计 `crc_errors`;
+- 其余字节才进入文本缓冲,帧内 `0x0A` 不会污染文本;
+- `ChassisLink._feed_bytes()` 内部使用的就是它;`link.wheel_parser` 保留为
+  该实例的别名,兼容既有 `stats` 访问。
+
 ---
 
 ## 四、`link.py` — `ChassisLink` 抽象基类
@@ -269,7 +306,9 @@ class ParsedMessage:
 
 ```python
 ChassisLink(*, on_line: Callable[[str, ParsedMessage], None] | None = None,
-              on_state: Callable[[str], None] | None = None)
+              on_state: Callable[[str], None] | None = None,
+              on_wheel: Callable[[WheelFrame], None] | None = None,
+              on_stats: Callable[[LinkStats], None] | None = None)
 ```
 
 | 回调 | 触发时机 | 线程 | 可选 |
@@ -289,6 +328,7 @@ ChassisLink(*, on_line: Callable[[str, ParsedMessage], None] | None = None,
 | `detail_text` | `str` | 链路详情(GATT 树 / 串口参数) |
 | `mtu` | `int` | BLE 有效;串口为 0 |
 | `last_error` | `str` | 最近一次错误描述 |
+| `wheel_parser` | `StreamDemux` | 接收解复用器(帧/文本/统计) |
 
 ### 4.3 生命周期
 
@@ -306,7 +346,7 @@ await link.send(data: bytes) -> None                        # abstract,原始字
 await link.send_vel(speed_mps, deg, omega_radps) -> None    # ★ 主接口
 await link.send_stop() -> None
 await link.send_text(text: str) -> None
-await link.send_set(name: str, value: float) -> None
+await link.send_set(name: str, value: float, scale: int | None = None) -> None
 await link.send_mot(left: float, right: float) -> None      # 兼容
 ```
 
@@ -317,7 +357,7 @@ await link.send_mot(left: float, right: float) -> None      # 兼容
 ```python
 link._emit(text)               # 触发 on_state
 link._emit_line(text)          # 解析并触发 on_line
-link._feed_bytes(data: bytes)  # 按 \n 分帧(粘包/半包安全)
+link._feed_bytes(data: bytes)  # StreamDemux:帧优先 + 文本行分帧(粘包/半包安全)
 ```
 
 ---
@@ -522,7 +562,10 @@ BLEBackend(address: str | None = None, *, on_line=None, on_state=None)
 | | `CONNECT_OP_TIMEOUT` | 40.0 | BLE GATT 操作 |
 | | `CONNECT_MAX_ATTEMPTS` / `CONNECT_RETRY_DELAY` | 5 / 2.0 | 重试 |
 | | `RECONNECT_ON_DROP` | True | 掉线自动重连 |
+| | `RECONNECT_DELAY` | 5.0 | 重连等待/重试间隔(秒) |
 | 协议 | `ENCODING` / `LINE_END` | utf-8 / `"\n"` | |
+| | `SET_PARAMS` | MAX_SPEED/MAX_OMEGA ×1000 | SET 参数缩放表 |
+| | `SET_DEFAULT_SCALE` | 1 | 未登记参数缩放 |
 | UI | `VEL_UI_MAX` | 2.0 | 速度滑块上限 m/s |
 | | `DEG_UI_MIN/MAX` | ±180 | 方向角范围 |
 | | `OMEGA_UI_MIN/MAX` | ±6.28 | 自转范围 |
@@ -543,13 +586,15 @@ main()           # 模块级入口(console_scripts 指向)
 | `link_kind: StringVar` | `"serial"` / `"ble"` |
 | `speed_var` / `deg_var` / `omega_var` | 三个控制量 |
 | `addr_var` | 目标(COM 号 / 地址) |
+| `set_name` / `set_val` | SET 参数名(可编辑下拉)/ 物理值 |
+| `set_hint_var` | SET 单位与缩放提示(如 ×1000) |
 
 | 方法 | 说明 |
 | :--- | :--- |
 | `on_connect()` / `on_disconnect()` | 连接/断开(含重复点击防护) |
 | `on_send_vel()` | 发送速度矢量 |
 | `on_stop()` | 急停 |
-| `on_send_set()` / `on_send_raw()` | SET / 手动行 |
+| `on_send_set()` / `on_send_raw()` | SET / 手动行(按 `config.SET_PARAMS` 自动缩放) |
 | `on_self_check()` | 自检(串口列表 / BLE 扫描) |
 | `log_sys/tx/rx/err(text)` | 写日志 |
 

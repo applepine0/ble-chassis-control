@@ -14,6 +14,8 @@ from ble_chassis_control.protocol import (  # noqa: E402
     FRAME_HEAD,
     FRAME_LEN,
     WHEEL_COUNT,
+    Protocol,
+    StreamDemux,
     WheelFrameParser,
     crc8,
     decode_wheel_frame,
@@ -144,6 +146,54 @@ def test_mixed_with_text_lines() -> None:
     print("10) 与 TEL 文本行混流互不干扰: OK")
 
 
+def test_stream_demux_mixed_frames_and_text() -> None:
+    """P0 回归:100Hz 帧 + 10Hz TEL 混流,帧与 TEL 都必须完整解析。"""
+    frames: list[int] = []
+    lines: list[str] = []
+    d = StreamDemux(on_frame=lambda f: frames.append(f.seq), on_text=lines.append)
+    for seq in range(100):
+        # 10/20/-30/40 rpm 的帧内含 0x0A 字节,旧实现会污染文本行
+        d.feed(mk(seq, [10.0, 20.0, -30.0, 40.0]))
+        if seq % 10 == 0:
+            d.feed(b"TEL:BAT:7.4,SPD:120\n")
+    assert frames == list(range(100)), frames[:10]
+    tels = [line for line in lines if line.startswith("TEL:")]
+    assert len(tels) == 10, lines
+    assert all(Protocol.parse_line(line).kind == "tel" for line in tels), tels
+    assert d.stats.garbage_bytes == 0, d.stats.garbage_bytes
+    assert d.stats.crc_errors == 0, d.stats.crc_errors
+    print("12) StreamDemux 混流:100 帧 + 10 条 TEL 全部正确,无假杂散: OK")
+
+
+def test_stream_demux_interleaved_and_partial() -> None:
+    """文本/帧交错、半帧拼接都不能串行。"""
+    frames: list[int] = []
+    lines: list[str] = []
+    d = StreamDemux(on_frame=lambda f: frames.append(f.seq), on_text=lines.append)
+    d.feed(b"hello\n")
+    f = mk(7, [1.0, 2.0, 3.0, 4.0])
+    d.feed(f[:-1])
+    assert frames == [], "半帧不应提前出帧"
+    d.feed(f[-1:] + b"world\n")
+    assert frames == [7], frames
+    assert lines == ["hello", "world"], lines
+    print("13) StreamDemux 文本/帧交错 + 半帧拼接: OK")
+
+
+def test_stream_demux_crc_recovery() -> None:
+    """坏帧后仍能恢复,且残字节不会污染后续 TEL 行。"""
+    frames: list[int] = []
+    lines: list[str] = []
+    d = StreamDemux(on_frame=lambda f: frames.append(f.seq), on_text=lines.append)
+    bad = bytearray(mk(1, [1.0, 1.0, 1.0, 1.0]))
+    bad[5] ^= 0xFF
+    d.feed(bytes(bad) + mk(2, [2.0, 2.0, 2.0, 2.0]) + b"TEL:BAT:7.4\n")
+    assert frames == [2], frames
+    assert d.stats.crc_errors >= 1, d.stats.crc_errors
+    assert lines == ["TEL:BAT:7.4"], lines
+    print(f"14) StreamDemux 坏帧恢复(CRC 错 {d.stats.crc_errors} 次)+ 后续 TEL 干净: OK")
+
+
 def test_zero_and_extremes() -> None:
     """零值与 int16 边界值应正确编解码。"""
     for vals in ([0, 0, 0, 0], [32767.0, -32768.0, 32767.0, -32768.0]):
@@ -167,4 +217,7 @@ if __name__ == "__main__":
     test_parser_garbage_and_recovery()
     test_mixed_with_text_lines()
     test_zero_and_extremes()
+    test_stream_demux_mixed_frames_and_text()
+    test_stream_demux_interleaved_and_partial()
+    test_stream_demux_crc_recovery()
     print("\n二进制帧(方案 B,11B)测试全部通过 ✓")

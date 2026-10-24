@@ -137,6 +137,7 @@ class SerialBackend(ChassisLink):
                 )
                 self._ser = ser
                 self._stop_evt.clear()
+                self.wheel_parser.reset()
                 self._reader = threading.Thread(
                     target=self._read_loop, name="serial-reader", daemon=True
                 )
@@ -195,13 +196,25 @@ class SerialBackend(ChassisLink):
             )
 
     async def _reconnect_loop(self) -> None:
-        self._emit("5 秒后自动重连串口 ...")
-        await asyncio.sleep(5.0)
+        """掉线后持续重试,直到成功或手动断开。
+
+        注意:这里调用 ``disconnect(manual=False)`` 只清理旧资源,
+        不会取消 ``_reconnect_task``(该任务正是当前协程本身)。
+        """
+        delay = float(config.RECONNECT_DELAY)
         try:
-            await self.disconnect(manual=False)
-            await self.connect()
-        except LinkError as exc:
-            self._emit(f"自动重连失败:{exc}")
+            while not self._manual_disconnect:
+                self._emit(f"{delay:g} 秒后自动重连串口 ...")
+                await asyncio.sleep(delay)
+                if self._manual_disconnect:
+                    break
+                try:
+                    await self.disconnect(manual=False)
+                    await self.connect()
+                    self._emit("串口自动重连成功")
+                    return
+                except LinkError as exc:
+                    self._emit(f"自动重连失败:{exc}({delay:g} 秒后重试)")
         finally:
             self._reconnect_task = None  # type: ignore[assignment]
 
@@ -223,7 +236,8 @@ class SerialBackend(ChassisLink):
     # ------------------------------------------------------------------
     async def disconnect(self, manual: bool = True) -> None:
         self._manual_disconnect = manual
-        if self._reconnect_task:
+        # 只有手动断开才取消重连;重连协程内部清理时不能取消自身
+        if manual and self._reconnect_task:
             self._reconnect_task.cancel()
             self._reconnect_task = None
         self._stop_evt.set()

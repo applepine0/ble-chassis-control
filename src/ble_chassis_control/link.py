@@ -55,11 +55,13 @@ class ChassisLink(ABC):
         self.detail_text: str = ""     # 链路细节(GATT 树 / 串口参数)
         self.mtu: int = 0              # BLE 有值;串口后端为 0
         self.last_error: str = ""
-        self._rx_buffer = b""
-        # 二进制帧解析(四轮速度反馈)+ 丢帧统计
-        from .protocol import WheelFrameParser
+        # 单缓冲解复用:二进制帧优先,其余字节按文本行分帧。
+        # 属性名 wheel_parser 保留,兼容既有代码/文档中的 stats 访问。
+        from .protocol import StreamDemux
 
-        self.wheel_parser = WheelFrameParser(on_frame=on_wheel, on_stats=on_stats)
+        self.wheel_parser = StreamDemux(
+            on_frame=on_wheel, on_stats=on_stats, on_text=self._emit_line
+        )
 
     # ------------------------------------------------------------------
     # 状态与回调
@@ -93,25 +95,12 @@ class ChassisLink(ABC):
                 logger.exception("on_line 回调异常")
 
     def _feed_bytes(self, data: bytes) -> None:
-        """接收处理:二进制帧优先识别,其余按换行分帧为文本行。
+        """接收处理:统一交给 StreamDemux。
 
-        混用策略:先把数据喂给二进制帧解析器(它只吃 0xAA 开头的定长帧),
-        同时按换行切分文本。两者互不干扰 —— 因为文本行是 ASCII,
-        不含 0xAA 帧头,而帧内也可能出现 0x0A 字节,故先做帧解析。
+        帧优先消费,帧内字节不会进入文本缓冲;剩余字节按 ``\\n`` 分帧。
+        这样二进制帧与文本行真正互不干扰(帧内出现 0x0A 也不会切错行)。
         """
-        from . import config
-        from .protocol import decode_line
-
-        # 1) 二进制帧(四轮速度)—— 独立缓存,不影响文本分帧
         self.wheel_parser.feed(data)
-
-        # 2) 文本行
-        delim = config.LINE_END.encode(config.ENCODING)
-        self._rx_buffer += data
-        while delim in self._rx_buffer:
-            raw_line, _, self._rx_buffer = self._rx_buffer.partition(delim)
-            if raw_line:
-                self._emit_line(decode_line(raw_line))
 
     # ------------------------------------------------------------------
     # 生命周期
@@ -153,7 +142,8 @@ class ChassisLink(ABC):
 
         await self.send(Protocol.encode_stop())
 
-    async def send_set(self, name: str, value: float) -> None:
+    async def send_set(self, name: str, value: float, scale: int | None = None) -> None:
+        """通用参数设置;scale 为空时按 config.SET_PARAMS 查表(方案 A)。"""
         from .protocol import Protocol
 
-        await self.send(Protocol.encode_set(name, value))
+        await self.send(Protocol.encode_set(name, value, scale=scale))

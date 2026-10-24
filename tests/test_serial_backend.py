@@ -106,33 +106,35 @@ def main() -> None:
             link._ser.written  # type: ignore[union-attr]
         print("3) 发送(VEL/MOT 编码 + flush): OK")
 
-        # 4) 自动重连调度(修复验证)
+        # 4) 自动重连:掉线后应真的重新打开串口(而不仅是打印状态)
         before = len(states)
-        link._ser.inject(b"")                          # type: ignore[union-attr]
-        # 人为触发掉线:让 read 抛异常
+        old_ser = link._ser
+        bs.config.RECONNECT_DELAY = 0.05
+
         class Boom(RuntimeError):
             pass
 
-        cancelled = False
         def boom_read(n=1):  # noqa: ANN001
-            nonlocal cancelled
-            if not cancelled:
-                raise Boom("线掉了")
-            return link._ser.read(n)  # type: ignore[union-attr]
+            raise Boom("线掉了")
 
-        original_read = link._ser.read                    # type: ignore[union-attr]
         link._ser.read = boom_read                        # type: ignore[union-attr]
         await asyncio.sleep(0.3)
-        # 掉线后应立即出现"串口连接中断"与"5 秒后自动重连"状态
         joined = " | ".join(states[before:])
         assert "连接中断" in joined, states[before:]
         assert "自动重连" in joined, states[before:]
-        print("4) 读线程掉线 → 自动重连调度(修复验证): OK")
+
+        for _ in range(30):
+            if link.is_connected:
+                break
+            await asyncio.sleep(0.1)
+        assert link.is_connected, f"自动重连应成功,states={states[before:]}"
+        assert link._ser is not old_ser, "应打开新的串口对象"
+        assert "串口自动重连成功" in " | ".join(states[before:]), states[before:]
+        print("4) 读线程掉线 → 自动重连成功(新串口对象): OK")
 
         # 5) 断开
-        cancelled = True
-        link._ser.read = original_read                    # type: ignore[union-attr]
         await link.disconnect()
+        bs.config.RECONNECT_DELAY = 5.0
         assert not link.is_connected
         assert "已关闭" in states[-1], states
         print("5) 断开与资源释放: OK")

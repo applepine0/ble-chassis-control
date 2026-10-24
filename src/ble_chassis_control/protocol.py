@@ -14,7 +14,7 @@
     语义,不进协议层。底盘类型(舵轮/麦轮/差速)亦由 MCU 侧逆解,本协议只表达意图。
 
     STOP\\n                         急停(三量归零,短帧优先)
-    SET:<参数名>:<数值>\\n           通用参数设置,例如 SET:MAX_SPEED:0.8
+    SET:<参数名>:<整数>\\n           通用参数设置,按参数缩放(0.8 m/s → SET:MAX_SPEED:800)
 
 兼容保留(旧差速接口):
     MOT:<左轮速度>,<右轮速度>\\n    差速底盘速度命令,单位 %,范围 [-100,100]
@@ -139,11 +139,25 @@ class Protocol:
         return f"{TAG_MOT}:{_fmt(l)},{_fmt(r)}{config.LINE_END}".encode(config.ENCODING)
 
     @staticmethod
-    def encode_set(name: str, value: float) -> bytes:
-        """通用参数设置,例如 SET:MAX_SPEED:80。"""
-        return f"{TAG_SET}:{name}:{_fmt(float(value))}{config.LINE_END}".encode(
-            config.ENCODING
-        )
+    def encode_set(name: str, value: float, scale: int | None = None) -> bytes:
+        """通用参数设置(方案 A:线上整数,按参数缩放)。
+
+        Args:
+            name:  参数名(如 ``MAX_SPEED``),按 ``config.SET_PARAMS`` 查缩放
+            value: 物理值(如 0.8 m/s)
+            scale: 缩放系数;``None`` 时查表,未登记参数按 ×1
+
+        Returns:
+            bytes: 形如 ``b"SET:MAX_SPEED:800\\n"``(0.8 m/s ×1000)
+        """
+        name = str(name).strip()
+        s = int(config.set_scale(name) if scale is None else scale)
+        if s <= 0:
+            raise ValueError(f"SET 缩放必须为正整数: {scale!r}")
+        raw = int(round(float(value) * s))
+        # 与 MCU 端 int32 解析范围对齐,避免溢出
+        raw = max(-(2**31), min(2**31 - 1, raw))
+        return f"{TAG_SET}:{name}:{raw}{config.LINE_END}".encode(config.ENCODING)
 
     @staticmethod
     def encode_raw(text: str) -> bytes:
@@ -211,7 +225,7 @@ class Protocol:
             try:
                 msg.params["value"] = float(value.strip())
             except ValueError:
-                msg.error = "SET 格式应为 SET:<参数名>:<数值>"
+                msg.error = "SET 格式应为 SET:<参数名>:<整数>"
             return msg
 
         # 遥测回传
@@ -405,6 +419,98 @@ class WheelFrameParser:
             if self.on_frame:
                 self.on_frame(frame)
             self._maybe_report()
+
+    def _maybe_report(self, force: bool = False) -> None:
+        if self.on_stats:
+            self.on_stats(self.stats)
+
+
+class StreamDemux:
+    """字节流解复用:二进制帧优先,其余字节按文本行分帧。
+
+    背景
+    ----
+    蓝牙 SPP/BLE 都是字节流,四轮速度帧(11B,载荷可含任意字节)与文本行
+    (``VEL/TEL/ERR...``,以 ``\\n`` 结尾)共用同一条流。若把同一份字节同时
+    喂给帧解析器和文本分帧器,帧内字节(尤其 ``0x0A``)会污染文本行,文本
+    字节也会被帧解析器误计为“杂散”。
+
+    本类用**单缓冲 + 帧优先**解决:
+
+    * 缓冲以 ``0xAA`` 开头且凑够 11B → 尝试解码;成功则整帧消费;
+    * 有帧头但 CRC 失败 → 丢弃整个 11B 候选帧继续扫描(计入 ``crc_errors``);
+    * 非 ``0xAA`` 开头 → 取到下一个 ``0xAA``(或缓冲末尾)作为文本字节,
+      按 ``\\n`` 切行后回调 ``on_text``。
+
+    用法::
+
+        demux = StreamDemux(on_frame=cb, on_text=line_cb, on_stats=stats_cb)
+        demux.feed(data)      # 可多次喂入任意长度
+    """
+
+    _HEAD = bytes([FRAME_HEAD])
+
+    def __init__(self, on_frame=None, on_stats=None, on_text=None) -> None:
+        from typing import Callable
+
+        self.on_frame: Callable[[WheelFrame], None] | None = on_frame
+        self.on_stats: Callable[[LinkStats], None] | None = on_stats
+        self.on_text: Callable[[str], None] | None = on_text
+        self.stats = LinkStats()
+        self._buf = bytearray()
+        self._text = bytearray()
+
+    def reset(self, *, clear_stats: bool = True) -> None:
+        """清空接收缓冲(重连/重新订阅时调用)。"""
+        self._buf.clear()
+        self._text.clear()
+        if clear_stats:
+            self.stats.reset()
+
+    def feed(self, data: bytes) -> None:
+        """喂入字节;内部缓存并尽量切出完整帧与完整文本行。"""
+        self._buf += data
+        while self._buf:
+            # 1) 帧头:凑够整帧再尝试,避免把半帧误判为文本
+            if self._buf[0] == FRAME_HEAD:
+                if len(self._buf) < FRAME_LEN:
+                    return
+                frame = decode_wheel_frame(bytes(self._buf[:FRAME_LEN]))
+                if frame is None:
+                    # 坏帧:整帧丢弃,避免残字节污染后面的文本行
+                    self.stats.crc_errors += 1
+                    self.stats.garbage_bytes += FRAME_LEN
+                    del self._buf[:FRAME_LEN]
+                    self._maybe_report()
+                    continue
+                del self._buf[:FRAME_LEN]
+                lost = self.stats.note_ok(frame.seq)
+                if lost:
+                    self._maybe_report(force=True)
+                if self.on_frame:
+                    self.on_frame(frame)
+                self._maybe_report()
+                continue
+
+            # 2) 文本:一直取到下一个帧头之前
+            idx = self._buf.find(self._HEAD)
+            if idx < 0:
+                self._text += self._buf
+                self._buf.clear()
+            else:
+                self._text += self._buf[:idx]
+                del self._buf[:idx]
+            self._drain_text()
+
+    def _drain_text(self) -> None:
+        while True:
+            idx = self._text.find(b"\n")
+            if idx < 0:
+                return
+            raw = bytes(self._text[:idx])
+            del self._text[: idx + 1]
+            if raw and self.on_text:
+                self.on_text(decode_line(raw))
 
     def _maybe_report(self, force: bool = False) -> None:
         if self.on_stats:

@@ -51,8 +51,8 @@ class FakeBackend:
     async def send_stop(self) -> None:
         self.sent.append("STOP")
 
-    async def send_set(self, name: str, value: float) -> None:
-        self.sent.append(f"SET:{name}:{value}")
+    async def send_set(self, name: str, value: float, scale: int | None = None) -> None:
+        self.sent.append(Protocol.encode_set(name, value, scale=scale).decode().strip())
 
     async def send_text(self, text: str) -> None:
         self.sent.append(text)
@@ -155,6 +155,44 @@ def run() -> None:
         log = app.log.get("1.0", "end")
         assert "已连接,忽略重复" in log, log
         print("8) 已连接时重复连接防护: OK")
+
+        # 9) SET 方案 A:物理值按参数缩放成整数,并在界面显示单位/缩放
+        app.set_name.set("MAX_SPEED")
+        app.set_val.delete(0, "end")
+        app.set_val.insert(0, "0.8")
+        app._update_set_hint()
+        assert "×1000" in app.set_hint_var.get(), app.set_hint_var.get()
+        app.on_send_set()
+        pump(app, 0.5)
+        assert fake.sent[-1] == "SET:MAX_SPEED:800", fake.sent
+        log = app.log.get("1.0", "end")
+        assert "SET:MAX_SPEED:800" in log, log
+        print("9) SET 缩放(GUI 显示 ×1000,线上 800): OK")
+
+        # 10) 运动中断开:必须先等 STOP 发出,再关闭链路
+        app.speed_var.set(0.5)
+        app.deg_var.set(0.0)
+        app.omega_var.set(0.5)
+        app.on_motion_start()
+        pump(app, 0.4)
+        n_before = len(fake.sent)
+        app.on_disconnect()
+        pump(app, 1.5)
+        assert fake.connected is False, "断开后 connected 应为 False"
+        assert "STOP" in fake.sent[n_before:], fake.sent[n_before:]
+        print("10) 运动中断开:先发 STOP 再断开: OK")
+
+        # 11) 运动中切换链路:旧链路也必须先收到 STOP
+        fake.connected = True
+        app.on_motion_start()
+        pump(app, 0.4)
+        n_before = len(fake.sent)
+        app.link_kind.set("ble")
+        app._rebuild_link()
+        pump(app, 1.5)
+        assert "STOP" in fake.sent[n_before:], fake.sent[n_before:]
+        assert fake.connected is False, "旧链路应先发 STOP 再断开"
+        print("11) 运动中断开旧链路:先发 STOP 再切换: OK")
 
         print("\nGUI 功能测试(模拟链路)全部通过 ✓")
     finally:

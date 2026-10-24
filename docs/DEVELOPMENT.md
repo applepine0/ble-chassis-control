@@ -23,15 +23,15 @@
 | 模块 | 状态 | 验证方式 |
 | :--- | :--- | :--- |
 | `protocol.py` 文本协议(VEL/STOP/SET/TEL) | ✅ | `tests/test_smoke.py` |
-| `protocol.py` 二进制帧(11B,CRC8+seq) | ✅ | `tests/test_wheel_frame.py`(11 项) |
+| `protocol.py` 二进制帧(11B,CRC8+seq) | ✅ | `tests/test_wheel_frame.py`(14 项) |
 | `link.py` 链路抽象(分帧/回调/统计) | ✅ | 上述两项覆盖 |
 | `backend_serial.py` 串口链路 | ✅ | `tests/test_serial_backend.py`(6 项)+ **真机 HC-06 实测** |
 | `motion.py` 定频运动下发(θ 积分) | ✅ | `tests/test_motion.py`(10 项)+ **真机验证** |
 | `chart.py` 四轮转速曲线 | ✅ | `tests/test_chart.py`(7 项) |
-| `frontend.py` GUI | ✅ | `tests/test_gui_flow.py`(8 路径) |
+| `frontend.py` GUI | ✅ | `tests/test_gui_flow.py`(11 路径) |
 | `backend.py` BLE 链路 | ⚠️ 代码完成但**本机模块不兼容** | 见第五节 |
 
-> ⚠️ 上表为历史验证结论。2026-10-24 复测发现混流、自动重连、`SET` 小数语义等问题,详见第十一节“已知问题”。
+> ⚠️ 上表为历史验证结论。2026-10-24 复测后:混流、自动重连、`SET` 缩放、运动中断开已修复;定频与脚本重复仍待处理(见第十一节)。
 
 ### ⏳ 待做(按优先级)
 
@@ -40,7 +40,7 @@
 | 1 | **MCU 端联调** | 由底盘固件工程按本仓库协议文档实现;本仓库不提供 MCU 侧参考代码 |
 | 2 | **验证端到端** | 上位机发 VEL → MCU 逆解 → 舵轮动作 → 回传四轮 rpm → 曲线显示 |
 | 3 | **底盘能力限幅** | 目前只有 int16 钳位(±32.7 m/s),**无业务限幅**。建议加 `CHASSIS_MAX_V` / `CHASSIS_MAX_OMEGA` |
-| 4 | **git 提交** | 提交本轮文档清理(见第七节) |
+| 4 | **git 提交** | 提交本轮 P0/P1 修复与文档更新(见第七节) |
 | 5 | 可选:延迟测量 | 需要 MCU 回传时间戳(13B 帧方案) |
 | 6 | 可选:多链路并行 | 同时开 HC-06 控制 + USB-TTL 观察 |
 
@@ -108,9 +108,13 @@ MCU:     收到 (v, θ, ω) 即算即用,不做任何积分
 蓝牙 SPP 是字节流,**写成功 ≠ 对端收到** —— 没有 seq 就永远不知道丢了多少帧。
 序号回绕用**掩码减法**处理:`lost = (seq - expected) & 0xFF`。
 
-### 决策 7:接收侧**二进制帧与文本行并行解析**
+### 决策 7:接收侧用 **StreamDemux** 统一解复用(帧优先)
 
-互不干扰:帧由独立状态机处理(遇 `0xAA` 试定长,CRC 不过则丢首字节继续扫描),文本按 `\n` 分帧。
+**单缓冲 + 帧优先**:缓冲以 `0xAA` 开头且凑够 11B 时先尝试帧,成功则整帧消费;
+坏帧整帧丢弃并计 `crc_errors`;其余字节才进入文本缓冲,按 `\n` 分帧。
+
+这样帧内 `0x0A` 不会切错文本行,正常文本字节也不会被计成“杂散”。
+链路层 `link.wheel_parser` 保留为 `StreamDemux` 实例的别名。
 
 ### 决策 8:曲线图**纯 tkinter Canvas**(不引 matplotlib)
 
@@ -124,11 +128,11 @@ MCU:     收到 (v, θ, ω) 即算即用,不做任何积分
 
 ```
 ┌────────────────────────────────────────────────────────────┐
-│ ① Protocol (protocol.py)       纯函数:编码 / 解析 / CRC / 帧状态机 │
+│ ① Protocol (protocol.py)       纯函数:编码/解析/CRC + StreamDemux │
 ├────────────────────────────────────────────────────────────┤
 │ ② MotionRunner (motion.py)     θ 时间积分 + 定频下发           │
 ├────────────────────────────────────────────────────────────┤
-│ ③ ChassisLink (link.py)        抽象:connect/send + 分帧/回调   │
+│ ③ ChassisLink (link.py)        抽象:connect/send + 解复用/回调 │
 ├────────────────────────────────────────────────────────────┤
 │ ④ SerialBackend / BLEBackend   具体链路                       │
 ├────────────────────────────────────────────────────────────┤
@@ -145,7 +149,7 @@ GUI 主线程 ──[run_coroutine_threadsafe]──> asyncio 后台守护线程
                    (回调绝不直接碰 tk 控件)
 ```
 
-串口读线程另有独立线程,数据经 `_feed_bytes()` → 分帧 → 回调 → 队列 → GUI。
+串口读线程另有独立线程,数据经 `_feed_bytes()` → `StreamDemux`(帧优先)→ 回调 → 队列 → GUI。
 
 ---
 
@@ -199,10 +203,10 @@ uv run python -m ble_chassis_control # 等价
 
 # --- 测试(本机:5 套全绿;motion 2 项见第十一节)---
 uv run python tests/test_smoke.py         # 协议/后端/GUI 冒烟
-uv run python tests/test_gui_flow.py      # GUI 8 条路径(含错误分支)
-uv run python tests/test_serial_backend.py # 串口后端 6 项(含只下发模式)
+uv run python tests/test_gui_flow.py      # GUI 11 条路径(含 SET 缩放/运动中断开)
+uv run python tests/test_serial_backend.py # 串口后端 6 项(含重连/只下发模式)
 uv run python tests/test_motion.py        # θ 积分/世界系定向 10 项
-uv run python tests/test_wheel_frame.py   # 二进制帧 11 项(CRC/丢帧/回绕)
+uv run python tests/test_wheel_frame.py   # 二进制帧 14 项(CRC/丢帧/回绕/StreamDemux)
 uv run python tests/test_chart.py         # 曲线图 7 项
 
 # --- 工具 ---
@@ -226,26 +230,29 @@ uv run python tools/bench_hc06.py COM15 115200             # 吞吐基准
 
 ## 七、当前工作区改动(待提交)
 
-本轮按交付要求删除了 MCU 侧参考实现,并清理文档引用:
+本轮修复 P0/P1 并落地 SET 方案 A:
 
-```
-M README.md
-M docs/API.md
-M docs/DEVELOPMENT.md
-D tools/mcu/chassis_protocol.c
-```
+**代码**
 
-改动要点:
+- `protocol.py`:新增 `StreamDemux`(帧优先解复用);`encode_set(name, value, scale)` 改为整数 + 缩放;
+- `config.py`:`SET_PARAMS` / `set_param()` / `RECONNECT_DELAY`;
+- `link.py`:`_feed_bytes()` 走 `StreamDemux`;`send_set(scale=...)`;
+- `backend_serial.py`:自动重连不再自取消,按 `RECONNECT_DELAY` 持续重试;连接时重置解复用器;
+- `backend.py`:连接时重置解复用器;
+- `frontend.py`:SET 单位/缩放提示 + 自动取整;断开前等待运动协程发 STOP。
 
-- 删除 `tools/mcu/chassis_protocol.c`(及空目录 `tools/mcu/`);
-- README 移除“MCU 端参考实现”段落与文档导航行,API 章节数 14 → 13;
-- API 删除“MCU 端接口(C 参考)”整章,原第 14 章顺延为第 13 章;
-- 本文件移除待办、提交清单、下一步、关键文件表中的 C 文件引用;
-- API 第 11 章子节编号 `9.1~9.5` 修正为 `11.1~11.5`;
-- README/API 中“混流互不干扰”的表述改为“已知限制”(见第十一节第 1 项);
-- 补充第十一节“已知问题”(本轮实测)。
+**测试**
 
-提交建议:`docs: 移除 MCU 参考实现并清理文档引用`。
+- `test_wheel_frame.py`:14 项(新增 StreamDemux 3 项);
+- `test_serial_backend.py`:断言真实重连成功;
+- `test_gui_flow.py`:新增 SET 缩放、运动中断开、切换链路;
+- `test_smoke.py`:SET 缩放断言。
+
+**文档**
+
+- README / API / DEVELOPMENT 同步协议、GUI、修复状态与测试数量。
+
+提交建议:`fix(link): 修复混流与自动重连;feat(protocol): SET 整数缩放(GUI 体现)`。
 
 ---
 
@@ -254,12 +261,16 @@ D tools/mcu/chassis_protocol.c
 | # | 坑 | 现象 | 根因 | 修法 |
 | :--- | :--- | :--- | :--- | :--- |
 | 1 | **偏心转** | 车转得比预期快、转心偏移 | θ 被积分两次(上位机 + MCU) | MCU 不积分;SIGN=-1 反向补偿 |
-| 2 | **读线程自动重连失效** | 掉线后不重连 | 读线程里 `asyncio.get_event_loop()` 必然抛错 | `run_coroutine_threadsafe` + 保存 loop 引用(历史修复;当前仍有自取消问题,见第十一节) |
+| 2 | **读线程自动重连失效** | 掉线后不重连 | 读线程里 `asyncio.get_event_loop()` 必然抛错 | `run_coroutine_threadsafe` + 保存 loop 引用;自取消问题已修(见第十一节) |
 | 3 | **连接按钮自锁** | 连上后按钮仍可点,二次连接失败 | 成功回调误调 `_ready_buttons()` | 成功只调 `_set_connected()` |
 | 4 | **`except` 变量 NameError** | 连接失败时 GUI 崩 | lambda 延迟引用被 Python 销毁的 `exc` | 创建 lambda 时用默认参数绑定值 |
 | 5 | **ttk 背景色报错** | `unknown option "-background"` | `ttk.Frame` 不支持 `cget("background")` | 图例用 `tk.Label`,不显式设背景 |
 | 6 | **串口被占用重试无意义** | 白等 8 秒 | 占用是持久状态,重试无用 | `PermissionError` 立即放弃 |
 | 7 | **HC-06 AT 不响应** | 所有 AT 无回复 | ①模块已连接(串口被切透传)②波特率被改过 | 红灯闪烁时发;8 档波特率扫描 |
+| 8 | **帧内 `0x0A` 污染文本行** | `TEL` 偶发解析失败/日志乱码 | 同一份字节同时喂帧解析器与文本分帧器 | `StreamDemux` 单缓冲、帧优先 |
+| 9 | **自动重连自取消** | 掉线后不重连 | 重连协程调用 `disconnect()`,取消了自身任务 | 仅手动断开时 cancel |
+| 10 | **SET 小数被整数解析拒绝** | `SET:MAX_SPEED:0.8` 下发失败 | 协议未定义缩放,上位机发小数 | 方案 A:线上整数 + `SET_PARAMS` |
+| 11 | **断开时 STOP 抢跑** | 断开后底盘仍保持速度 | `motion.stop()` 与 `disconnect()` 并发 | 先等运动协程退出再断开 |
 
 ---
 
@@ -279,26 +290,33 @@ D tools/mcu/chassis_protocol.c
 
 | 文件 | 作用 |
 | :--- | :--- |
-| `src/ble_chassis_control/protocol.py` | 协议定义(文本编码 + 二进制帧 + CRC) |
+| `src/ble_chassis_control/protocol.py` | 协议定义(文本编码 + 二进制帧 + CRC + StreamDemux) |
 | `src/ble_chassis_control/motion.py` | θ 时间积分与定频下发(**SIGN 语义在此**) |
 | `src/ble_chassis_control/link.py` | 链路抽象(分帧/回调/统计) |
 | `src/ble_chassis_control/backend_serial.py` | 串口后端(HC-06 实际用这个) |
 | `src/ble_chassis_control/chart.py` | 四轮转速曲线 |
 | `src/ble_chassis_control/config.py` | **所有可调参数集中于此** |
 | `docs/API.md` | 完整接口文档(13 章) |
-| `tests/` | 6 套测试(本机 5 套全绿;motion 8/10,详见第十一节) |
+| `tests/` | 6 套测试(本机 5 套全绿;motion 8/10;wheel 14 项/GUI 11 路径) |
 
 ---
 
-## 十一、已知问题(本轮实测)
+## 十一、本轮修复与剩余问题(2026-10-24)
 
-> 以下为 2026-10-24 在 Windows 本机复测结果。均不影响 HC-05 手动遥控;但第 1、2 项会直接影响回传显示与断线恢复,建议联调前优先处理。
+### ✅ 已修复(P0/P1)
 
-| # | 问题 | 位置 | 实测/现象 | 建议 |
-| :--- | :--- | :--- | :--- | :--- |
-| 1 | **二进制帧污染文本行** | `link.py` `_feed_bytes()` | 100Hz 四轮帧 + 10Hz `TEL` 混流:100 帧正常,但 0/10 条 `TEL` 解析成功;日志出现 `ª...TEL:...` 乱码,`garbage_bytes` 把正常文本也计入 | 改为单一字节流解复用器(帧优先,剩余字节交给文本);补 `_feed_bytes` 混流回归测试 |
-| 2 | **串口自动重连不生效** | `backend_serial.py` `_reconnect_loop()` / `disconnect()` | 强制读异常后等待 7s 仍为断开,状态停在“5 秒后自动重连串口 ...”;原因是 `disconnect()` 取消了正在运行的重连任务自身 | 仅手动断开时取消重连任务;重连路径不要调用会取消自身的 `disconnect()` |
-| 3 | **`SET` 小数语义未定义** | `protocol.py` `encode_set()` / 协议文档 | 上位机默认发 `SET:MAX_SPEED:0.8`;按整数解析的固件会拒绝(`ERR:BAD_SET_NUM`) | 明确 `SET` 值为 ×1000 定点,或协议层改为整数 + 逐参数缩放 |
-| 4 | **断开时 STOP 可能未发出** | `frontend.py` `on_disconnect()` | `motion.stop()` 与 `disconnect()` 并发,串口可能先关闭,运动协程的 STOP 写不出去 | 断开前等待运动协程退出并确认 STOP 写入(复用 `_shutdown_sequence`) |
-| 5 | **定频下发频率偏低** | `motion.py` + Windows 定时粒度 | 20Hz 设定约 17 帧/s;50Hz 约 32.2Hz;`test_motion.py` 2 项因此失败 | 可选 `winmm.timeBeginPeriod(1)`;或调整测试容差并标注平台差异 |
-| 6 | **`verify_serial.py` 执行两次** | `tools/verify_serial.py` | 文件尾部有两个 `if __name__ == "__main__"` 块,脚本会完整跑两遍 | 删除重复块,并把示例 `MOT:0,0` 改为 `VEL` |
+| # | 问题 | 修复 |
+| :--- | :--- | :--- |
+| 1 | **二进制帧污染文本行** | 新增 `StreamDemux`(帧优先、单缓冲);`ChassisLink._feed_bytes()` 改走统一解复用;坏帧整帧丢弃;`test_wheel_frame.py` 新增 3 项回归 |
+| 2 | **串口自动重连不生效** | `disconnect(manual=False)` 不再取消重连任务;重连循环按 `RECONNECT_DELAY` 持续重试;`test_serial_backend.py` 改为断言真实重连 |
+| 3 | **`SET` 数值语法/缩放未定义** | 采用方案 A:线上整数 + 参数缩放(`config.SET_PARAMS`);`encode_set/send_set` 支持 `scale`;GUI 显示单位/缩放并自动取整 |
+| 4 | **断开时 STOP 可能未发出** | `on_disconnect()` / `_rebuild_link()` 先等运动协程退出(内部发 STOP)再关链路;GUI 测试第 10/11 条覆盖 |
+
+### ⏳ 仍待处理
+
+| # | 问题 | 说明 | 建议 |
+| :--- | :--- | :--- | :--- |
+| 5 | **定频下发频率偏低** | 20Hz 设定约 17 帧/s;50Hz 约 32.2Hz;`test_motion.py` 2 项失败 | 可选 `winmm.timeBeginPeriod(1)`;或调整测试容差并标注平台差异 |
+| 6 | **`verify_serial.py` 执行两次** | 文件尾部有两个 `if __name__ == "__main__"` 块 | 删除重复块,并把示例 `MOT:0,0` 改为 `VEL` |
+
+> P0/P1 已修复并有回归测试;剩余两项不影响手动遥控。
