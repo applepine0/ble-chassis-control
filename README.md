@@ -38,6 +38,7 @@ uv run python -m ble_chassis_control
 | 手动发送 | 任意透传文本行发送(自动补 `\n`) |
 | 通信日志 | TX/RX 分色显示、带时间戳、自动滚动、可清空 |
 | **四轮速度反馈** | 解析 11B 二进制帧并显示四轮实测转速(**rpm**,带轮位名) |
+| **四轮转速曲线** | 实时曲线图(纯 tkinter Canvas),四色区分 + 自动量程 + 零线 |
 | **链路健康度** | 丢帧数/丢帧率、CRC 错误、杂散字节(seq 推断) |
 | 链路详情 | 串口:端口 + 波特率参数;BLE:GATT 服务树 |
 
@@ -138,6 +139,7 @@ src/ble_chassis_control/
 ├── config.py          # 链路选择 / 串口参数 / 地址 / UUID / 超时重试 / UI 范围
 ├── protocol.py        # 协议:VEL 编码 + TEL/二进制帧解析(CRC8/seq 丢帧统计)
 ├── motion.py          # 定频运动下发:θ(t)=θ₀+SIGN·∫ω·dt(SIGN=-1 世界系定向)
+├── chart.py           # 四轮转速实时曲线(纯 Canvas,环形缓冲 + 节流重绘)
 ├── link.py            # 链路抽象基类 ChassisLink(统一 BLE 与串口的接口)
 ├── backend.py         # BLE 后端(Bleak):扫描→连接→UUID 自动解析→收发
 ├── backend_serial.py  # 串口后端(pyserial):HC-05/06 / USB-TTL,读线程+自动重连
@@ -237,6 +239,7 @@ uv run python tests/test_smoke.py        # 协议/后端/GUI 冒烟(不连硬件
 uv run python tests/test_gui_flow.py     # GUI 功能测试:模拟后端跑通连接/发送/回传/显示
 uv run python tests/test_motion.py       # MotionRunner 测试:θ 累积/世界系定向/定频(10 项)
 uv run python tests/test_wheel_frame.py  # 四轮速度帧:CRC/丢帧/回绕/混流(10 项)
+uv run python tests/test_chart.py        # 曲线图:环形缓冲/量程/绘制(6 项)
 uv run python tests/test_serial_backend.py  # 串口后端功能测试(6 项,含只下发模式)
 ```
 

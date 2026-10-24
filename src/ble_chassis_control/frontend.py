@@ -18,6 +18,7 @@ from typing import Optional
 from . import config
 from .backend import BLEBackend, BLEError
 from .backend_serial import SerialBackend, available_ports
+from .chart import WheelChart
 from .link import ChassisLink, LinkError
 from .motion import MotionRunner
 from .protocol import ParsedMessage
@@ -87,6 +88,8 @@ class App(tk.Tk):
         unit = frame.unit or ""
         vals = "  ".join(f"{name}={v:+6.0f}" for name, v in frame.labeled())
         self.wheel_var.set(f"四轮转速 [{unit}]: {vals}   (seq={frame.seq})")
+        # 推入曲线(高频调用,内部有节流重绘)
+        self.chart.push(frame.speeds)
 
     def _show_link_stats(self, stats) -> None:
         """链路健康度:丢帧率 / CRC 错误 / 垃圾字节。"""
@@ -306,9 +309,15 @@ class App(tk.Tk):
         self.btn_raw = ttk.Button(ctrl, text="发送", command=self.on_send_raw)
         self.btn_raw.grid(row=10, column=0, columnspan=3, sticky="ew", pady=8)
 
-        # 右侧:日志
-        logf = ttk.LabelFrame(mid, text=" 通信日志 ", padding=4)
-        logf.grid(row=0, column=1, sticky="nsew")
+        # 右侧:日志 + 转速曲线
+        right = ttk.Frame(mid)
+        right.grid(row=0, column=1, sticky="nsew")
+        right.columnconfigure(0, weight=1)
+        right.rowconfigure(0, weight=1)     # 日志占主要空间
+        right.rowconfigure(1, weight=0)     # 曲线固定高度
+
+        logf = ttk.LabelFrame(right, text=" 通信日志 ", padding=4)
+        logf.grid(row=0, column=0, sticky="nsew")
         logf.columnconfigure(0, weight=1)
         logf.rowconfigure(0, weight=1)
 
@@ -326,6 +335,20 @@ class App(tk.Tk):
         ttk.Button(logf, text="清空日志", width=10, command=self.clear_log).grid(
             row=1, column=0, columnspan=2, sticky="e", pady=4
         )
+
+        # 四轮转速实时曲线
+        chartf = ttk.LabelFrame(right, text=" 四轮转速曲线 ", padding=4)
+        chartf.grid(row=1, column=0, sticky="ew", pady=(6, 0))
+        chartf.columnconfigure(0, weight=1)
+        self.chart = WheelChart(
+            chartf,
+            names=config.WHEEL_NAMES,
+            unit=config.WHEEL_SPEED_UNIT,
+            maxlen=config.CHART_MAXLEN,
+            redraw_ms=config.CHART_REDRAW_MS,
+            height=config.CHART_HEIGHT,
+        )
+        self.chart.grid(row=0, column=0, sticky="ew")
 
         # 底部:四轮速度反馈 + 链路健康度
         bottom = ttk.Frame(self, padding=(8, 0))
@@ -626,6 +649,11 @@ class App(tk.Tk):
                 elif kind == "ui":
                     payload()
         except queue.Empty:
+            pass
+        # 曲线节流重绘(内部按 redraw_ms 限制,不会成为瓶颈)
+        try:
+            self.chart.maybe_redraw()
+        except Exception:
             pass
         self.after(50, self._poll_queues)
 

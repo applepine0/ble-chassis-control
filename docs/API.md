@@ -21,6 +21,7 @@
 │    BLE(Bleak)/ 串口(pyserial,HC-05/06/USB-TTL)              │
 ├─────────────────────────────────────────────────────────────┤
 │ ⑤ 界面        App (frontend.py)  tkinter + asyncio 后台线程  │
+│     └─ WheelChart (chart.py)  四轮转速实时曲线                │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -395,7 +396,71 @@ normalize_deg(deg: float) -> float    # 归一化到 [-180, 180)
 
 ---
 
-## 六、`backend_serial.py` — `SerialBackend`(主用)
+## 六、`chart.py` — `WheelChart`(四轮转速曲线)
+
+纯 tkinter Canvas 实现,**无第三方依赖**。
+
+### 6.1 构造
+
+```python
+WheelChart(master, *,
+           names=("右前","左前","左后","右后"),  # 轮位名(图例)
+           unit="rpm",                        # 纵轴单位标注
+           maxlen=600,                        # 环形缓冲容量(采样点数)
+           redraw_ms=50,                      # 重绘节流(ms)→ 20fps
+           height=150)                        # 画布高度(px)
+```
+
+### 6.2 方法
+
+```python
+chart.push((120.0, -250.0, 0.0, 385.0))   # 推入一帧四轮转速(w0..w3 顺序)
+chart.clear()                              # 清空曲线
+chart.maybe_redraw()                       # 由主循环定期调用(内部按 redraw_ms 节流)
+```
+
+### 6.3 行为契约
+
+| 项 | 说明 |
+| :--- | :--- |
+| **环形缓冲** | `maxlen` 满后自动丢弃最旧采样,内存恒定(600 @100Hz ≈ 6 秒窗口) |
+| **自动量程** | 纵轴按数据范围自动缩放并留 10% 余量;**零线始终可见**(轮速有正负) |
+| **节流重绘** | 数据可 100Hz 到达,重绘限制为 `redraw_ms`(默认 20fps),不拖慢界面 |
+| **无数据提示** | 超过 2 秒无新帧,状态行显示"(无数据)";曲线保持最后状态 |
+| **容错** | 空数据/单采样点/不足 4 轮的数据均不崩溃 |
+
+### 6.4 配色
+
+| 轮位 | 颜色 |
+| :--- | :--- |
+| 右前 (w0) | `#D32F2F` 红 |
+| 左前 (w1) | `#1976D2` 蓝 |
+| 左后 (w2) | `#388E3C` 绿 |
+| 右后 (w3) | `#F57C00` 橙 |
+
+### 6.5 配置项
+
+| 项 | 默认 | 说明 |
+| :--- | ---: | :--- |
+| `config.CHART_MAXLEN` | 600 | 采样点容量 |
+| `config.CHART_REDRAW_MS` | 50 | 重绘节流(ms) |
+| `config.CHART_HEIGHT` | 150 | 画布高度(px) |
+
+### 6.6 示例
+
+```python
+from ble_chassis_control.chart import WheelChart
+
+chart = WheelChart(parent, names=("右前","左前","左后","右后"), unit="rpm")
+chart.grid(row=1, column=0, sticky="ew")
+
+# 收到帧时推入(Chart 由主循环 maybe_redraw() 驱动)
+link = SerialBackend("COM15", 115200, on_wheel=lambda f: chart.push(f.speeds))
+```
+
+---
+
+## 七、`backend_serial.py` — `SerialBackend`(主用)
 
 ```python
 SerialBackend(port: str | None = None,
@@ -422,7 +487,7 @@ guess_port() -> str | None                   # 优先蓝牙 SPP 口,否则唯一
 
 ---
 
-## 七、`backend.py` — `BLEBackend`(备用)
+## 八、`backend.py` — `BLEBackend`(备用)
 
 ```python
 BLEBackend(address: str | None = None, *, on_line=None, on_state=None)
@@ -441,7 +506,7 @@ BLEBackend(address: str | None = None, *, on_line=None, on_state=None)
 
 ---
 
-## 八、`config.py` 配置项
+## 九、`config.py` 配置项
 
 | 分组 | 项 | 默认 | 说明 |
 | :--- | :--- | :--- | :--- |
@@ -460,7 +525,7 @@ BLEBackend(address: str | None = None, *, on_line=None, on_state=None)
 
 ---
 
-## 九、`frontend.py` — `App`
+## 十、`frontend.py` — `App`
 
 ```python
 App()            # 构造:启动 asyncio 后台线程 + 建界面
@@ -486,7 +551,7 @@ main()           # 模块级入口(console_scripts 指向)
 
 ---
 
-## 十、只下发模式(不接收回传)
+## 十一、只下发模式(不接收回传)
 
 **结论:当前架构完全支持只下发,无需任何改动、无兼容风险。**
 
@@ -558,7 +623,7 @@ proto_send_telemetry_raw(v_mmps, deg_tenths, omega_mradps);
 
 ---
 
-## 十一、异常
+## 十二、异常
 
 ```python
 class LinkError(Exception)   # link.py;BLEError 为其别名
@@ -573,7 +638,7 @@ class LinkError(Exception)   # link.py;BLEError 为其别名
 
 ---
 
-## 十二、MCU 端接口(C 参考)
+## 十三、MCU 端接口(C 参考)
 
 `tools/mcu/chassis_protocol.c`:
 
@@ -594,7 +659,7 @@ void proto_send_telemetry_raw(int32_t v, int32_t deg, int32_t omega);
 
 ---
 
-## 十三、典型使用示例
+## 十四、典型使用示例
 
 ### 脚本方式(只下发)
 
