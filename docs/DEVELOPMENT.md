@@ -278,7 +278,7 @@ uv run python tools/bench_hc06.py COM15 115200             # 吞吐基准
 
 1. **先读** `README.md`(协议 + 硬件结论)→ `docs/API.md`(全部 API);
 2. **跑测试** 确认环境正常(本机 5 套全绿;motion 2 项受 Windows 定时粒度影响,见第十一节);
-3. **接 MCU**:由底盘固件按 `docs/API.md` 第 2 章的线格式实现解析、CRC 与 11B 帧发送;
+3. **接 MCU**:由底盘固件按 [`docs/MCU-INTERFACE.md`](MCU-INTERFACE.md) 实现解析、CRC 与 11B 帧发送;
    本仓库只负责上位机与协议文档,不提供 MCU 侧代码;
 4. **端到端验证**:GUI 发 VEL → 底盘动作 → 回传四轮 rpm → 曲线滚动;
 5. **加业务限幅**(第 3 项待办),防止误操作把底盘甩飞;
@@ -297,6 +297,7 @@ uv run python tools/bench_hc06.py COM15 115200             # 吞吐基准
 | `src/ble_chassis_control/chart.py` | 四轮转速曲线 |
 | `src/ble_chassis_control/config.py` | **所有可调参数集中于此** |
 | `docs/API.md` | 完整接口文档(13 章) |
+| `docs/MCU-INTERFACE.md` | **底盘 MCU 接口文档**(交给嵌入式同事) |
 | `tests/` | 6 套测试(本机 5 套全绿;motion 8/10;wheel 14 项/GUI 11 路径) |
 
 ---

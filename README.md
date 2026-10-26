@@ -133,6 +133,9 @@ link = SerialBackend("COM15", 115200,
 - 波特率与模块/MCU 一致(**当前 115200**;HC-06 默认 9600,可用 `AT+BAUD8` 改);
 - `v` 为标量大小,负值非法(上位机已钳为 0)。
 
+> 完整的 MCU 侧接线、解析、看门狗与验收用例见
+> **[`docs/MCU-INTERFACE.md`](docs/MCU-INTERFACE.md)**。
+
 ## 文档导航
 
 | 文档 | 内容 | 适合谁看 |
@@ -140,6 +143,7 @@ link = SerialBackend("COM15", 115200,
 | **本文(README)** | 快速上手、协议、硬件诊断结论 | 所有人 |
 | **[`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)** | **开发交接**:当前状态/待办、设计决策与原因、踩坑史、线程模型 | **接手开发者 / 新 AI 会话** |
 | [`docs/API.md`](docs/API.md) | 完整接口文档(13 章) | 调用 API 的人 |
+| **[`docs/MCU-INTERFACE.md`](docs/MCU-INTERFACE.md)** | **底盘 MCU 接口**:链路/指令/11B 帧/解析/安全/验收用例 | **嵌入式同事** |
 
 ## 接口文档
 
@@ -149,6 +153,9 @@ link = SerialBackend("COM15", 115200,
 - `Protocol` / `ChassisLink` / `SerialBackend` / `BLEBackend` / `App` 全部 API
 - 配置项速查表、异常说明、典型示例
 - **只下发模式(不接收回传)的支持情况与限制**
+
+MCU 侧(firmware)接口见 **[`docs/MCU-INTERFACE.md`](docs/MCU-INTERFACE.md)**:接线、指令解析、
+`SET` 缩放、11B 轮速帧、看门狗与验收用例。
 
 ## 代码结构
 

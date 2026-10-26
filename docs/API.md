@@ -29,6 +29,8 @@
 
 ## 二、协议接口(线格式)
 
+> MCU 侧实现(接线、解析、看门狗、验收用例)见 [MCU-INTERFACE.md](MCU-INTERFACE.md)。
+
 ### 2.1 主指令:速度矢量(PC → MCU)
 
 ```
