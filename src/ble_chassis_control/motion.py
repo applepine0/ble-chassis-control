@@ -147,6 +147,7 @@ class MotionRunner:
 
         self._stop.clear()
         self._running = True
+        self.last_error = ""
         period = self.period
         theta = self.theta0
         t0 = time.monotonic()
@@ -209,6 +210,10 @@ class MotionRunner:
                     await self.link.send_stop()
                 except Exception as exc:
                     logger.warning("停止时发送 STOP 失败: %s", exc)
+                    if not self.last_error:
+                        self.last_error = (
+                            f"STOP 下发失败:{type(exc).__name__}: {exc}"
+                        )
             return elapsed
         finally:
             self._running = False

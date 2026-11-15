@@ -411,9 +411,21 @@ class App(tk.Tk):
             return
         listing = " | ".join(f"{d}: {s}" for d, s in ports)
         self.port_hint.set(f"可用串口:{listing}")
-        # 若未指定且系统只有一个口,自动填入
-        if not self.addr_var.get().strip() and len(ports) == 1:
-            self.addr_var.set(ports[0][0])
+
+        # 自动选“带真实地址”的蓝牙口;旧的地址空端口不选
+        live_bt = [d for d, s in ports if "[蓝牙 " in s]
+        stale_bt = [d for d, s in ports if "地址空" in s]
+        current = self.addr_var.get().strip()
+        if current in stale_bt and len(live_bt) == 1:
+            self.addr_var.set(live_bt[0])
+            self.port_hint.set(
+                f"可用串口:{listing} | 已将旧口 {current} 切换为 {live_bt[0]}"
+            )
+        elif not current:
+            if len(live_bt) == 1:
+                self.addr_var.set(live_bt[0])
+            elif len(ports) == 1:
+                self.addr_var.set(ports[0][0])
 
     def _scale_drag(self, _=None) -> None:
         # 滑块拖动时不下发,避免刷屏;仅同步显示
@@ -570,6 +582,13 @@ class App(tk.Tk):
             return
         self.log_tx(f"VEL {speed:g} m/s, {deg:g}°, {omega:g} rad/s")
         self._submit(self.backend.send_vel(speed, deg, omega))
+        if not getattr(self, "_single_send_hint_shown", False):
+            self._single_send_hint_shown = True
+            self.log_sys(
+                "提示:VEL 是速度设定值,底盘会保持执行直到收到新指令或 STOP;"
+                "若 MCU 启用链路看门狗,超时未刷新才会停车。"
+                "需要 θ 随 ω 累积(旋转前进)请用[启动运动]"
+            )
 
     def on_stop(self) -> None:
         """急停:先终止定频运动(若在运行),再发 STOP。"""
@@ -645,6 +664,11 @@ class App(tk.Tk):
         )
 
     def _on_motion_finished(self, elapsed: float) -> None:
+        err = self.motion.last_error if self.motion is not None else ""
+        if err:
+            self.log_err(f"运动异常停止:{err}")
+            self._reset_motion_buttons("异常停止")
+            return
         self.log_sys(f"运动结束(运行 {elapsed:.1f}s),已下发 STOP")
         self._reset_motion_buttons("已停止")
 
