@@ -7,7 +7,7 @@
 
 ## 一、分层总览
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │ ① 应用层 API   Protocol / ParsedMessage  (protocol.py)      │
 │    纯函数:编码指令、解析回传,无 IO、可单测                    │
@@ -33,7 +33,7 @@
 
 ### 2.1 主指令:速度矢量(PC → MCU)
 
-```
+```text
 VEL:<v_mmps>,<deg_tenths>,<omega_mradps>\n
 ```
 
@@ -55,13 +55,17 @@ VEL:800,450,-500     0.8 m/s 朝 45.0°,-0.5 rad/s 自转
 
 #### ★ θ 时间语义(SIGN 符号约定)
 
-MCU 用 ``ω`` 驱动**车体自转**,车头姿态 ``φ(t) = ∫ω dt``。世界系运动方向::
+MCU 用 `ω` 驱动**车体自转**,车头姿态 `φ(t) = ∫ω dt`。世界系运动方向:
 
-    θ_world(t) = θ_body(t) + ∫ω dt
+```text
+θ_world(t) = θ_body(t) + ∫ω dt
+```
 
-上位机按以下关系累积 ``θ_body`` 并定频下发::
+上位机按以下关系累积 `θ_body` 并定频下发:
 
-    θ_body(t) = θ₀ + SIGN · ∫ω dt        (deg,归一化到 [-180, 180))
+```text
+θ_body(t) = θ₀ + SIGN · ∫ω dt        (deg,归一化到 [-180, 180))
+```
 
 | SIGN | θ_world 行为 | 物理效果 |
 | :--- | :--- | :--- |
@@ -214,6 +218,7 @@ crc8(b"123456789")                                           # 0xF4(标准向量
 ```python
 Protocol.encode_vel(speed_mps: float, deg: float, omega_radps: float) -> bytes
 ```
+
 速度矢量指令。负速度按 0 处理;超范围自动钳位。
 
 ```python
