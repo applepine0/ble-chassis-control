@@ -521,14 +521,14 @@ SerialBackend(port: str | None = None,
 | `kind` | `"serial"` |
 | `target` | `f"{port}@{baudrate}"` |
 
-**特性**:独立读线程、`asyncio.to_thread` 包装阻塞写、写入后 flush、掉线自动重连、中文友好报错。
+**特性**:独立读线程、`asyncio.to_thread` 包装阻塞写、flush 带超时、连接时写 STOP 探测、写失败/读异常均转为掉线并自动重连、中文友好报错。
 **读线程与发送完全解耦** —— 不订阅/不处理接收也不影响下发。
 
 ### 模块级函数
 
 ```python
-available_ports() -> list[tuple[str, str]]   # [(设备名, 描述)],蓝牙口标 [蓝牙]
-guess_port() -> str | None                   # 优先蓝牙 SPP 口,否则唯一口
+available_ports() -> list[tuple[str, str]]   # [(设备名, 描述)];蓝牙口标出真实地址
+guess_port() -> str | None                   # 优先带真实地址的蓝牙口,否则唯一口
 ```
 
 ---
@@ -559,7 +559,8 @@ BLEBackend(address: str | None = None, *, on_line=None, on_state=None)
 | 链路 | `LINK_KIND` | `"serial"` | `serial` / `ble` |
 | 串口 | `SERIAL_PORT` | `""` | 空=自动 |
 | | `SERIAL_BAUDRATE` | **115200** | 需与模块/MCU 一致 |
-| | `SERIAL_TIMEOUT` / `SERIAL_WRITE_TIMEOUT` | 0.2 / 2.0 | 秒 |
+| | `SERIAL_TIMEOUT` / `SERIAL_WRITE_TIMEOUT` | 0.2 / 2.0 | 秒;读超时 / 写+flush 超时 |
+| | `SERIAL_PROBE_ON_CONNECT` / `SERIAL_PROBE_TIMEOUT` | True / 2.5 | 连接时写 STOP 探测 / 探测超时 |
 | 连接 | `SCAN_TIMEOUT` | 10.0 | BLE 扫描 |
 | | `CONNECT_OP_TIMEOUT` | 40.0 | BLE GATT 操作 |
 | | `CONNECT_MAX_ATTEMPTS` / `CONNECT_RETRY_DELAY` | 5 / 2.0 | 重试 |

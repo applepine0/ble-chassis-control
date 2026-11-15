@@ -3,7 +3,7 @@
 > 本文档面向**接手本项目的人或 AI 会话**。
 > 目标:读完本文 + `README.md` + `docs/API.md`,即可无缝继续开发,无需回溯历史对话。
 >
-> 最后更新:2026-10-24
+> 最后更新:2026-10-27
 
 ---
 
@@ -25,13 +25,13 @@
 | `protocol.py` 文本协议(VEL/STOP/SET/TEL) | ✅ | `tests/test_smoke.py` |
 | `protocol.py` 二进制帧(11B,CRC8+seq) | ✅ | `tests/test_wheel_frame.py`(14 项) |
 | `link.py` 链路抽象(分帧/回调/统计) | ✅ | 上述两项覆盖 |
-| `backend_serial.py` 串口链路 | ✅ | `tests/test_serial_backend.py`(6 项)+ **真机 HC-06 实测** |
+| `backend_serial.py` 串口链路 | ✅ | `tests/test_serial_backend.py`(9 项)+ **真机 HC-06 实测** |
 | `motion.py` 定频运动下发(θ 积分) | ✅ | `tests/test_motion.py`(10 项)+ **真机验证** |
 | `chart.py` 四轮转速曲线 | ✅ | `tests/test_chart.py`(7 项) |
 | `frontend.py` GUI | ✅ | `tests/test_gui_flow.py`(11 路径) |
 | `backend.py` BLE 链路 | ⚠️ 代码完成但**本机模块不兼容** | 见第五节 |
 
-> ⚠️ 上表为历史验证结论。2026-10-24 复测后:混流、自动重连、`SET` 缩放、运动中断开已修复;定频与脚本重复仍待处理(见第十一节)。
+> ⚠️ 上表为历史验证结论。2026-10-24 复测后:混流、自动重连、`SET` 缩放、运动中断开、写超时重连、连接写探测已修复;定频仍待处理(见第十一节)。
 
 ### ⏳ 待做(按优先级)
 
@@ -204,7 +204,7 @@ uv run python -m ble_chassis_control # 等价
 # --- 测试(本机:5 套全绿;motion 2 项见第十一节)---
 uv run python tests/test_smoke.py         # 协议/后端/GUI 冒烟
 uv run python tests/test_gui_flow.py      # GUI 11 条路径(含 SET 缩放/运动中断开)
-uv run python tests/test_serial_backend.py # 串口后端 6 项(含重连/只下发模式)
+uv run python tests/test_serial_backend.py # 串口后端 9 项(含探测/写超时/重连/只下发)
 uv run python tests/test_motion.py        # θ 积分/世界系定向 10 项
 uv run python tests/test_wheel_frame.py   # 二进制帧 14 项(CRC/丢帧/回绕/StreamDemux)
 uv run python tests/test_chart.py         # 曲线图 7 项
@@ -235,16 +235,18 @@ uv run python tools/bench_hc06.py COM15 115200             # 吞吐基准
 **代码**
 
 - `protocol.py`:新增 `StreamDemux`(帧优先解复用);`encode_set(name, value, scale)` 改为整数 + 缩放;
-- `config.py`:`SET_PARAMS` / `set_param()` / `RECONNECT_DELAY`;
+- `config.py`:`SET_PARAMS` / `set_param()` / `RECONNECT_DELAY` / `SERIAL_PROBE_ON_CONNECT`;
 - `link.py`:`_feed_bytes()` 走 `StreamDemux`;`send_set(scale=...)`;
-- `backend_serial.py`:自动重连不再自取消,按 `RECONNECT_DELAY` 持续重试;连接时重置解复用器;
+- `backend_serial.py`:自动重连不再自取消,按 `RECONNECT_DELAY` 持续重试;连接时先写 `STOP` 探测;写/flush 超时主动断开并重连;连接时重置解复用器;
 - `backend.py`:连接时重置解复用器;
-- `frontend.py`:SET 单位/缩放提示 + 自动取整;断开前等待运动协程发 STOP。
+- `frontend.py`:SET 单位/缩放提示 + 自动取整;断开前等待运动协程发 STOP;运动异常停止显式报错;
+- `motion.py`:记录 STOP 下发失败,供 GUI 显示。
+- `tools/verify_serial.py`:去掉重复 `__main__`,默认测试行改为 `VEL:0,0,0`。
 
 **测试**
 
 - `test_wheel_frame.py`:14 项(新增 StreamDemux 3 项);
-- `test_serial_backend.py`:断言真实重连成功;
+- `test_serial_backend.py`:断言真实重连成功 + 写超时断开/重连 + 未上电时连接探测失败;
 - `test_gui_flow.py`:新增 SET 缩放、运动中断开、切换链路;
 - `test_smoke.py`:SET 缩放断言。
 
@@ -252,7 +254,7 @@ uv run python tools/bench_hc06.py COM15 115200             # 吞吐基准
 
 - README / API / DEVELOPMENT 同步协议、GUI、修复状态与测试数量。
 
-提交建议:`fix(link): 修复混流与自动重连;feat(protocol): SET 整数缩放(GUI 体现)`。
+提交建议:`fix(link): 修复混流与自动重连;feat(protocol): SET 整数缩放(GUI 体现);fix(serial): 写超时重连`。
 
 ---
 
@@ -270,6 +272,9 @@ uv run python tools/bench_hc06.py COM15 115200             # 吞吐基准
 | 8 | **帧内 `0x0A` 污染文本行** | `TEL` 偶发解析失败/日志乱码 | 同一份字节同时喂帧解析器与文本分帧器 | `StreamDemux` 单缓冲、帧优先 |
 | 9 | **自动重连自取消** | 掉线后不重连 | 重连协程调用 `disconnect()`,取消了自身任务 | 仅手动断开时 cancel |
 | 10 | **SET 小数被整数解析拒绝** | `SET:MAX_SPEED:0.8` 下发失败 | 协议未定义缩放,上位机发小数 | 方案 A:线上整数 + `SET_PARAMS` |
+| 11 | **写超时后假连接** | `Write timeout` 后每次发送都白等 2s | 写失败未标记断开,读线程又没报错 | 写/flush 超时即关闭串口并调度重连 |
+| 12 | **模块未上电也显示已连接** | COM 句柄能打开,但蓝牙链路不存在 | Windows 对已配对 SPP 口可只打开句柄 | 连接时写 `STOP` 探测;写/flush 超时判失败 |
+| 13 | **连到“幽灵”蓝牙 COM 口** | 瞬间打开,但写探测一直超时 | 重新配对/重启后 COM 号会变,旧号残留为地址全 0 的口 | 选带真实 MAC 的口;本机 `COM9`=CHASSIS,`COM15` 是旧口 |
 | 11 | **断开时 STOP 抢跑** | 断开后底盘仍保持速度 | `motion.stop()` 与 `disconnect()` 并发 | 先等运动协程退出再断开 |
 
 ---
@@ -298,11 +303,11 @@ uv run python tools/bench_hc06.py COM15 115200             # 吞吐基准
 | `src/ble_chassis_control/config.py` | **所有可调参数集中于此** |
 | `docs/API.md` | 完整接口文档(13 章) |
 | `docs/MCU-INTERFACE.md` | **底盘 MCU 接口文档**(交给嵌入式同事) |
-| `tests/` | 6 套测试(本机 5 套全绿;motion 8/10;wheel 14 项/GUI 11 路径) |
+| `tests/` | 6 套测试(本机 5 套全绿;motion 8/10;wheel 14 项/GUI 11 路径;serial 9 项) |
 
 ---
 
-## 十一、本轮修复与剩余问题(2026-10-24)
+## 十一、本轮修复与剩余问题(2026-10-27)
 
 ### ✅ 已修复(P0/P1)
 
@@ -312,12 +317,14 @@ uv run python tools/bench_hc06.py COM15 115200             # 吞吐基准
 | 2 | **串口自动重连不生效** | `disconnect(manual=False)` 不再取消重连任务;重连循环按 `RECONNECT_DELAY` 持续重试;`test_serial_backend.py` 改为断言真实重连 |
 | 3 | **`SET` 数值语法/缩放未定义** | 采用方案 A:线上整数 + 参数缩放(`config.SET_PARAMS`);`encode_set/send_set` 支持 `scale`;GUI 显示单位/缩放并自动取整 |
 | 4 | **断开时 STOP 可能未发出** | `on_disconnect()` / `_rebuild_link()` 先等运动协程退出(内部发 STOP)再关链路;GUI 测试第 10/11 条覆盖 |
+| 5 | **写超时后仍是“假连接”** | `send()` 对 `write`/`flush` 做超时;失败即关闭串口并调度重连;GUI 显示可操作原因 |
+| 6 | **`verify_serial.py` 执行两次** | 删除重复 `__main__` 块;默认测试行改为 `VEL:0,0,0` |
+| 7 | **模块未上电也瞬间“已连接”** | 连接时先写一条 `STOP` 做链路探测;写/flush 超时即判连接失败,不再只凭 COM 句柄打开就报成功 |
 
 ### ⏳ 仍待处理
 
 | # | 问题 | 说明 | 建议 |
 | :--- | :--- | :--- | :--- |
-| 5 | **定频下发频率偏低** | 20Hz 设定约 17 帧/s;50Hz 约 32.2Hz;`test_motion.py` 2 项失败 | 可选 `winmm.timeBeginPeriod(1)`;或调整测试容差并标注平台差异 |
-| 6 | **`verify_serial.py` 执行两次** | 文件尾部有两个 `if __name__ == "__main__"` 块 | 删除重复块,并把示例 `MOT:0,0` 改为 `VEL` |
+| 8 | **定频下发频率偏低** | 20Hz 设定约 17 帧/s;50Hz 约 32.2Hz;`test_motion.py` 2 项失败 | 可选 `winmm.timeBeginPeriod(1)`;或调整测试容差并标注平台差异 |
 
-> P0/P1 已修复并有回归测试;剩余两项不影响手动遥控。
+> P0/P1 已修复并有回归测试;剩余一项不影响手动遥控。
