@@ -5,7 +5,7 @@
     uv run python verify_serial.py COM15 9600      # 指定串口与波特率
     uv run python verify_serial.py COM15 9600 --listen 10   # 只监听 10 秒
     uv run python verify_serial.py COM15 9600 --hold        # 保持连接直到 Ctrl+C
-    uv run python verify_serial.py COM15 9600 --hold --send "MOT:25,25"   # 保持并循环发送
+    uv run python verify_serial.py COM15 9600 --hold --send "VEL:500,900,0"   # 保持并循环发送
 
 注意:连接是"打开即连"—— 脚本退出/断开串口会同时断开蓝牙链路,
 导致 HC-05/06 红灯回到闪烁。要持续遥控请用 --hold 或直接开 GUI。
@@ -92,8 +92,8 @@ async def main() -> None:
                 await asyncio.sleep(1.0)
         else:
             try:
-                await link.send_mot(0.0, 0.0)
-                print("    发送 MOT:0,0 OK")
+                await link.send_vel(0.0, 0.0, 0.0)
+                print("    发送 VEL:0,0,0 OK")
             except Exception as exc:
                 print(f"!! 发送失败: {exc}")
             print(f"\n==> 监听 {listen:.0f} 秒(底盘回传 / 模块事件将显示在此)...")
@@ -113,13 +113,6 @@ async def main() -> None:
 
     await link.disconnect()
     print("    已关闭串口(蓝牙链路随之断开,红灯回到闪烁)")
-
-
-if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\n已中断")
 
 
 if __name__ == "__main__":
