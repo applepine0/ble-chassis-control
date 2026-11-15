@@ -13,6 +13,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import ble_chassis_control.backend_serial as bs
 
 
+class WriteTimeout(Exception):
+    """模拟 pyserial 的 SerialTimeoutException('Write timeout')。"""
+
+
 class FakeSerial:
     """最小伪串口:读入一个字节队列;模拟阻塞读与 close。"""
 
@@ -24,6 +28,7 @@ class FakeSerial:
         self._cond = threading.Condition()
         self.written = b""
         self.read_calls = 0
+        self.fail_write = False
 
     # ---- 供给测试用的注入接口 ----
     def inject(self, data: bytes) -> None:
@@ -48,6 +53,8 @@ class FakeSerial:
             return out
 
     def write(self, data: bytes) -> int:
+        if self.fail_write:
+            raise WriteTimeout("Write timeout")
         self.written += data
         return len(data)
 
@@ -64,9 +71,19 @@ class FakeSerialModule:
     Serial = FakeSerial
 
 
+class OfflineSerial(FakeSerial):
+    """模拟“COM 口能打开,但模块没上电/写不出去”。"""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fail_write = True
+
+
 def main() -> None:
     bs.serial = FakeSerialModule          # 替换真实 pyserial
     bs.list_ports = type("LP", (), {"comports": staticmethod(lambda: [])})()
+    # 既有场景用假串口直接连,不启用 STOP 探测;探测场景单独测
+    bs.config.SERIAL_PROBE_ON_CONNECT = False
 
     lines: list[str] = []
     states: list[str] = []
@@ -157,8 +174,70 @@ def main() -> None:
         assert not link.is_connected
         print("6) 只下发模式(无 on_line 回调): OK")
 
+    async def write_timeout_scenario() -> None:
+        """写超时:必须立即断开(不再假连接),并自动重连。"""
+        local_states: list[str] = []
+        link = bs.SerialBackend("COM99", 9600, on_state=local_states.append)
+        await link.connect()
+        old_ser = link._ser
+        old_ser.fail_write = True
+        bs.config.RECONNECT_DELAY = 0.05
+        try:
+            await link.send_vel(0.5, 90, 0)
+        except bs.LinkError as exc:
+            assert "写超时" in str(exc), exc
+        else:
+            raise AssertionError("写超时应抛 LinkError")
+
+        assert not link.is_connected, "写失败后应立即标记断开"
+        for _ in range(30):
+            if link.is_connected:
+                break
+            await asyncio.sleep(0.1)
+        assert link.is_connected, f"写失败后应自动重连,states={local_states}"
+        assert link._ser is not old_ser, "应打开新的串口对象"
+        await link.disconnect()
+        bs.config.RECONNECT_DELAY = 5.0
+        print("7) 写超时 → 断开并自动重连: OK")
+
+    async def probe_failure_scenario() -> None:
+        """模块没上电:COM 能打开但 STOP 写不出去,必须判连接失败。"""
+        bs.config.SERIAL_PROBE_ON_CONNECT = True
+        bs.config.CONNECT_MAX_ATTEMPTS = 1
+        original_serial = bs.serial.Serial
+        bs.serial.Serial = OfflineSerial
+        try:
+            link = bs.SerialBackend("COM99", 9600)
+            try:
+                await link.connect()
+            except bs.LinkError as exc:
+                assert "写入探测失败" in str(exc), exc
+            else:
+                raise AssertionError("写探测失败时不应判定连接成功")
+            assert not link.is_connected
+        finally:
+            bs.serial.Serial = original_serial
+            bs.config.CONNECT_MAX_ATTEMPTS = 5
+            bs.config.SERIAL_PROBE_ON_CONNECT = False
+        print("8) 模块未上电 → 写探测失败,连接失败: OK")
+
+    async def probe_success_scenario() -> None:
+        """正常链路:连接探测会写一条 STOP,然后连接成功。"""
+        bs.config.SERIAL_PROBE_ON_CONNECT = True
+        try:
+            link = bs.SerialBackend("COM99", 9600)
+            await link.connect()
+            assert link._ser.written == b"STOP\n", link._ser.written  # type: ignore[union-attr]
+            await link.disconnect()
+        finally:
+            bs.config.SERIAL_PROBE_ON_CONNECT = False
+        print("9) 连接写探测成功(STOP): OK")
+
     asyncio.run(scenario())
     asyncio.run(send_only_scenario())
+    asyncio.run(write_timeout_scenario())
+    asyncio.run(probe_failure_scenario())
+    asyncio.run(probe_success_scenario())
     print("\nSerialBackend 功能测试全部通过 ✓")
 
 

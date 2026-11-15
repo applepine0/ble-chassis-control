@@ -42,6 +42,8 @@ SERIAL_PORT = ""             # 例:"COM5";空字符串 = 自动检测
 SERIAL_BAUDRATE = 115200     # HC-06 已改为 115200(必须与模块/MCU 端一致!)
 SERIAL_TIMEOUT = 0.2         # 读超时(秒),影响读取线程响应速度
 SERIAL_WRITE_TIMEOUT = 2.0   # 写超时(秒)
+SERIAL_PROBE_ON_CONNECT = True   # 打开串口后先写一条 STOP 探测链路
+SERIAL_PROBE_TIMEOUT = 2.5       # 连接探测(写+flush)超时(秒);首帧蓝牙可能较慢
 
 # 界面下拉可选的波特率(HC-06 编码表:4=9600, 8=115200)
 SERIAL_BAUD_CHOICES = [9600, 19200, 38400, 57600, 115200, 230400]

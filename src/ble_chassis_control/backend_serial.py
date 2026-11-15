@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import threading
 import time
 from typing import Optional
@@ -30,8 +31,30 @@ except ImportError:  # pragma: no cover - 引导安装
     list_ports = None  # type: ignore
 
 
+_BT_ADDR_RE = re.compile(r"&([0-9A-F]{12})_")
+
+
+def _bluetooth_address(hwid: str) -> str | None:
+    """从 BTHENUM 实例 ID 提取 12 位地址。
+
+    返回 ``None`` = 非蓝牙口;``""`` = 蓝牙口但地址全 0(通常是过期/幽灵口)。
+    """
+    m = _BT_ADDR_RE.search(hwid or "")
+    if not m:
+        return None
+    addr = m.group(1).upper()
+    return addr if set(addr) != {"0"} else ""
+
+
+def _format_mac(addr: str) -> str:
+    return ":".join(addr[i : i + 2] for i in range(0, 12, 2))
+
+
 def available_ports() -> list[tuple[str, str]]:
-    """列出系统可用串口:(设备名, 描述)。蓝牙 SPP 口会标注 [蓝牙]。"""
+    """列出系统可用串口:(设备名, 描述)。
+
+    蓝牙 SPP 口会标出真实地址;地址全 0 的旧口标为“可能失效”。
+    """
     if list_ports is None:
         return []
     out = []
@@ -39,19 +62,31 @@ def available_ports() -> list[tuple[str, str]]:
         desc = p.description or ""
         hwid = (p.hwid or "").upper()
         if "BTHENUM" in hwid or "BLUETOOTH" in desc.upper():
-            desc = f"{desc} [蓝牙]"
+            addr = _bluetooth_address(hwid)
+            if addr:
+                desc = f"{desc} [蓝牙 {_format_mac(addr)}]"
+            elif addr == "":
+                desc = f"{desc} [蓝牙·地址空/可能失效]"
+            else:
+                desc = f"{desc} [蓝牙]"
         out.append((p.device, desc))
     return out
 
 
 def guess_port() -> str | None:
-    """智能猜口:优先蓝牙 SPP 口,否则仅有的一个口。"""
+    """智能猜口:优先“带真实地址”的蓝牙口,再退回唯一的蓝牙/串口。"""
     ports = available_ports()
     if not ports:
         return None
-    for dev, desc in ports:
-        if "[蓝牙]" in desc:
-            return dev
+
+    live_bt = [dev for dev, desc in ports if "[蓝牙 " in desc]
+    if len(live_bt) == 1:
+        return live_bt[0]
+
+    stale_bt = [dev for dev, desc in ports if "地址空" in desc]
+    if not live_bt and len(stale_bt) == 1:
+        return stale_bt[0]
+
     if len(ports) == 1:
         return ports[0][0]
     return None
@@ -135,6 +170,10 @@ class SerialBackend(ChassisLink):
                     timeout=config.SERIAL_TIMEOUT,
                     write_timeout=config.SERIAL_WRITE_TIMEOUT,
                 )
+                # Windows 对“已配对但模块没上电”的 SPP 口也可能打开成功;
+                # 先写一条 STOP,写不出去就不算连接成功(避免假连接)。
+                if config.SERIAL_PROBE_ON_CONNECT:
+                    await self._probe_serial(ser)
                 self._ser = ser
                 self._stop_evt.clear()
                 self.wheel_parser.reset()
@@ -161,6 +200,33 @@ class SerialBackend(ChassisLink):
                     await asyncio.sleep(config.CONNECT_RETRY_DELAY)
 
         raise LinkError(f"串口打开失败:{self.last_error}")
+
+    async def _probe_serial(self, ser) -> None:
+        """打开后写一条 STOP 探测;写不出去说明蓝牙链路/模块不可用。"""
+        from .protocol import Protocol
+
+        try:
+            old_timeout = getattr(ser, "write_timeout", None)
+            if old_timeout is not None:
+                ser.write_timeout = float(config.SERIAL_PROBE_TIMEOUT)
+            try:
+                await asyncio.to_thread(ser.write, Protocol.encode_stop())
+            finally:
+                if old_timeout is not None:
+                    ser.write_timeout = old_timeout
+            await asyncio.wait_for(
+                asyncio.to_thread(ser.flush),
+                timeout=float(config.SERIAL_PROBE_TIMEOUT),
+            )
+        except Exception as exc:
+            try:
+                await asyncio.to_thread(ser.close)
+            except Exception:
+                pass
+            raise LinkError(
+                "串口已打开但写入探测失败:"
+                f"{self._friendly_write(exc, config.SERIAL_PROBE_TIMEOUT)}"
+            ) from exc
 
     # ------------------------------------------------------------------
     # 读线程
@@ -227,9 +293,32 @@ class SerialBackend(ChassisLink):
         ser = self._ser
         try:
             await asyncio.to_thread(ser.write, data)
-            await asyncio.to_thread(ser.flush)
+            # flush 在蓝牙虚拟串口上可能无限阻塞,单独加超时
+            await asyncio.wait_for(
+                asyncio.to_thread(ser.flush),
+                timeout=float(config.SERIAL_WRITE_TIMEOUT),
+            )
         except Exception as exc:
-            raise LinkError(f"串口写入失败:{exc}") from exc
+            # 写超时/写失败 = 链路已不可用。主动断开并调度重连,
+            # 否则 is_connected 会一直是 True(假连接),后续每次发送都白等 2s。
+            self.last_error = self._friendly_write(exc)
+            self._emit(f"串口写入失败:{self.last_error}")
+            await self._drop_link()
+            raise LinkError(f"串口写入失败:{self.last_error}") from exc
+
+    async def _drop_link(self) -> None:
+        """写失败后主动关闭串口并调度重连。"""
+        ser, self._ser = self._ser, None
+        self._stop_evt.set()
+        if ser is not None:
+            try:
+                await asyncio.to_thread(ser.close)
+            except Exception:
+                pass
+        if self._reader and self._reader.is_alive():
+            await asyncio.to_thread(self._reader.join, 1.0)
+        self._reader = None
+        self._handle_drop()
 
     # ------------------------------------------------------------------
     # 断开
@@ -255,6 +344,19 @@ class SerialBackend(ChassisLink):
     # ------------------------------------------------------------------
     # 工具
     # ------------------------------------------------------------------
+    @staticmethod
+    def _friendly_write(exc: Exception, timeout: float | None = None) -> str:
+        """把写超时翻译成可操作的提示。"""
+        msg = str(exc) or type(exc).__name__
+        if isinstance(exc, TimeoutError) or "TIMEOUT" in msg.upper():
+            t = config.SERIAL_WRITE_TIMEOUT if timeout is None else timeout
+            return (
+                f"写超时({t:g}s):"
+                "HC-05 可能未连接、模块 UART 缓冲已满(MCU 未取数)或蓝牙驱动卡住。"
+                "已断开并尝试自动重连;请检查模块 LED、MCU 供电与 TX/RX、两端 115200"
+            )
+        return f"{type(exc).__name__}:{msg}"
+
     @staticmethod
     def _friendly(exc: Exception) -> str:
         msg = str(exc)
