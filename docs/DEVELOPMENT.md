@@ -28,7 +28,7 @@
 | `backend_serial.py` 串口链路 | ✅ | `tests/test_serial_backend.py`(9 项)+ **真机 HC-06 实测** |
 | `motion.py` 定频运动下发(θ 积分) | ✅ | `tests/test_motion.py`(10 项)+ **真机验证** |
 | `chart.py` 四轮转速曲线 | ✅ | `tests/test_chart.py`(7 项) |
-| `frontend.py` GUI | ✅ | `tests/test_gui_flow.py`(11 路径) |
+| `frontend.py` GUI | ✅ | `tests/test_gui_flow.py`(14 路径) |
 | `backend.py` BLE 链路 | ⚠️ 代码完成但**本机模块不兼容** | 见第五节 |
 
 > ⚠️ 上表为历史验证结论。2026-10-24 复测后:混流、自动重连、`SET` 缩放、运动中断开、写超时重连、连接写探测已修复;定频仍待处理(见第十一节)。
@@ -203,7 +203,7 @@ uv run python -m ble_chassis_control # 等价
 
 # --- 测试(本机:5 套全绿;motion 2 项见第十一节)---
 uv run python tests/test_smoke.py         # 协议/后端/GUI 冒烟
-uv run python tests/test_gui_flow.py      # GUI 11 条路径(含 SET 缩放/运动中断开)
+uv run python tests/test_gui_flow.py      # GUI 14 条路径(含 SET 缩放/运动中断开/状态同步)
 uv run python tests/test_serial_backend.py # 串口后端 9 项(含探测/写超时/重连/只下发)
 uv run python tests/test_motion.py        # θ 积分/世界系定向 10 项
 uv run python tests/test_wheel_frame.py   # 二进制帧 14 项(CRC/丢帧/回绕/StreamDemux)
@@ -303,7 +303,7 @@ uv run python tools/bench_hc06.py COM15 115200             # 吞吐基准
 | `src/ble_chassis_control/config.py` | **所有可调参数集中于此** |
 | `docs/API.md` | 完整接口文档(13 章) |
 | `docs/MCU-INTERFACE.md` | **底盘 MCU 接口文档**(交给嵌入式同事) |
-| `tests/` | 6 套测试(本机 5 套全绿;motion 8/10;wheel 14 项/GUI 11 路径;serial 9 项) |
+| `tests/` | 6 套测试(本机 5 套全绿;motion 8/10;wheel 14 项/GUI 14 路径;serial 9 项) |
 
 ---
 

@@ -187,6 +187,7 @@ class SerialBackend(ChassisLink):
                     f"(HC-05 = 经典蓝牙 SPP 虚拟串口)"
                 )
                 self._emit(f"串口已打开:{self.port} @ {self.baudrate}")
+                self.last_error = ""
                 return True
             except Exception as exc:  # serial.SerialException 等
                 last = exc
@@ -298,6 +299,7 @@ class SerialBackend(ChassisLink):
                 asyncio.to_thread(ser.flush),
                 timeout=float(config.SERIAL_WRITE_TIMEOUT),
             )
+            self.last_error = ""
         except Exception as exc:
             # 写超时/写失败 = 链路已不可用。主动断开并调度重连,
             # 否则 is_connected 会一直是 True(假连接),后续每次发送都白等 2s。

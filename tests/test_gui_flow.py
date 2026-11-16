@@ -9,6 +9,7 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 
+from ble_chassis_control import config
 from ble_chassis_control.protocol import Protocol  # noqa: E402
 
 
@@ -193,6 +194,51 @@ def run() -> None:
         assert "STOP" in fake.sent[n_before:], fake.sent[n_before:]
         assert fake.connected is False, "旧链路应先发 STOP 再断开"
         print("11) 运动中断开旧链路:先发 STOP 再切换: OK")
+
+        # 12) BLE/串口上下文切换:BLE 隐藏串口控件,切回恢复并记住端口
+        app.link_kind.set("serial")
+        app._sync_target_field()
+        pump(app, 0.2)
+        serial_port = app.addr_var.get().strip()
+        app.link_kind.set("ble")
+        app._rebuild_link()
+        pump(app, 0.2)
+        assert app.addr_var.get() == config.DEVICE_ADDRESS
+        assert not app.baud_box.winfo_ismapped(), "BLE 模式不应显示波特率"
+        assert not app.refresh_btn.winfo_ismapped(), "BLE 模式不应显示刷新口"
+        app.link_kind.set("serial")
+        app._rebuild_link()
+        pump(app, 0.2)
+        assert app.baud_box.winfo_ismapped(), "串口模式应恢复波特率"
+        assert app.refresh_btn.winfo_ismapped(), "串口模式应恢复刷新口"
+        if serial_port:
+            assert app.addr_var.get() == serial_port, app.addr_var.get()
+        print("12) BLE/串口上下文切换: OK")
+
+        # 13) 掉线/自动重连状态同步到状态栏与按钮
+        app._handle_state("串口连接中断")
+        assert "中断" in app.status_var.get(), app.status_var.get()
+        assert str(app.btn_conn["state"]) == "disabled"
+        assert str(app.btn_disc["state"]) == "normal"
+        app._handle_state("5 秒后自动重连串口 ...")
+        assert "重连" in app.status_var.get(), app.status_var.get()
+        app._handle_state("串口自动重连成功")
+        assert "已连接" in app.status_var.get(), app.status_var.get()
+        print("13) 掉线/自动重连状态同步: OK")
+
+        # 14) 日志行数上限
+        import ble_chassis_control.frontend as fe
+
+        old_max = fe.MAX_LOG_LINES
+        fe.MAX_LOG_LINES = 50
+        try:
+            for i in range(120):
+                app.log_sys(f"log-{i}")
+            lines = int(app.log.index("end-1c").split(".")[0])
+            assert lines <= 50, lines
+        finally:
+            fe.MAX_LOG_LINES = old_max
+        print("14) 日志行数上限: OK")
 
         print("\nGUI 功能测试(模拟链路)全部通过 ✓")
     finally:

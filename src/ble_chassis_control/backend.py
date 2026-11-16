@@ -82,6 +82,7 @@ class BLEBackend(ChassisLink):
             self._emit(f"连接第 {attempt}/{config.CONNECT_MAX_ATTEMPTS} 次 ...")
             try:
                 await self._connect_once()
+                self.last_error = ""
                 return True
             except Exception as exc:
                 last = exc
@@ -217,6 +218,7 @@ class BLEBackend(ChassisLink):
                 await self._client.write_gatt_char(
                     self._write_char, data, response=mode
                 )
+                self.last_error = ""
                 return
             except Exception as exc:
                 last = exc

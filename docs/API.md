@@ -601,7 +601,7 @@ main()           # 模块级入口(console_scripts 指向)
 | :--- | :--- |
 | `on_connect()` / `on_disconnect()` | 连接/断开(含重复点击防护) |
 | `on_send_vel()` | 发送速度矢量 |
-| `on_stop()` | 急停 |
+| `on_stop()` | 急停(按钮或 `Esc`) |
 | `on_send_set()` / `on_send_raw()` | SET / 手动行(按 `config.SET_PARAMS` 自动缩放) |
 | `on_self_check()` | 自检(串口列表 / BLE 扫描) |
 | `log_sys/tx/rx/err(text)` | 写日志 |
