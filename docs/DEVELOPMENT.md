@@ -136,7 +136,8 @@ MCU:     收到 (v, θ, ω) 即算即用,不做任何积分
 ├────────────────────────────────────────────────────────────┤
 │ ④ SerialBackend / BLEBackend   具体链路                       │
 ├────────────────────────────────────────────────────────────┤
-│ ⑤ App (frontend.py) + WheelChart (chart.py)                   │
+│ ⑤ App 控制器(frontend.py)+ ui/layout.py 视图 + ui/theme.py 主题 │
+│    + WheelChart(chart.py)                                      │
 └────────────────────────────────────────────────────────────┘
 ```
 
@@ -299,8 +300,11 @@ uv run python tools/bench_hc06.py COM15 115200             # 吞吐基准
 | `src/ble_chassis_control/motion.py` | θ 时间积分与定频下发(**SIGN 语义在此**) |
 | `src/ble_chassis_control/link.py` | 链路抽象(分帧/回调/统计) |
 | `src/ble_chassis_control/backend_serial.py` | 串口后端(HC-06 实际用这个) |
-| `src/ble_chassis_control/chart.py` | 四轮转速曲线 |
-| `src/ble_chassis_control/config.py` | **所有可调参数集中于此** |
+| `src/ble_chassis_control/chart.py` | 四轮转速曲线(可注入主题配色) |
+| `src/ble_chassis_control/frontend.py` | 控制器:事件/异步/状态机(不含控件构建) |
+| `src/ble_chassis_control/ui/theme.py` | sv-ttk 主题 / DPI / 字体 / `Palette` |
+| `src/ble_chassis_control/ui/layout.py` | 视图层:纯控件构建 |
+| `src/ble_chassis_control/config.py` | **所有可调参数集中于此**(含 `UI_THEME`) |
 | `docs/API.md` | 完整接口文档(13 章) |
 | `docs/MCU-INTERFACE.md` | **底盘 MCU 接口文档**(交给嵌入式同事) |
 | `tests/` | 6 套测试(本机 5 套全绿;motion 8/10;wheel 14 项/GUI 14 路径;serial 9 项) |

@@ -10,6 +10,7 @@ requires-python = ">=3.13"
 dependencies = [
     "bleak>=3.0.2",
     "pyserial>=3.5",
+    "sv-ttk>=2.6.1",
 ]
 
 [project.scripts]

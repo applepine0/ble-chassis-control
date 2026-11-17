@@ -45,9 +45,9 @@ VEL:<v_mmps>,<deg_tenths>,<omega_mradps>\n
 
 **缩放系数**:`v × 1000`、`deg × 10`、`omega × 1000`(四舍五入 + 钳位)
 
-**静态示例**
+**静态示例**:
 
-```
+```text
 VEL:500,900,0        0.5 m/s,90.0°,不转(直行)
 VEL:0,0,1570         原地 1.570 rad/s 自转
 VEL:800,450,-500     0.8 m/s 朝 45.0°,-0.5 rad/s 自转
@@ -81,7 +81,7 @@ MCU 用 `ω` 驱动**车体自转**,车头姿态 `φ(t) = ∫ω dt`。世界系�
 
 **时序示例**(20Hz,`v=0.5 m/s`、`θ₀=0°`、`ω=1.5708 rad/s` = 90°/s,SIGN=−1)
 
-```
+```text
 t=0.00s  VEL:500,0,1571        θ_body=0°
 t=0.05s  VEL:500,-45,1571      θ_body=-4.5°
 t=0.10s  VEL:500,-91,1571      θ_body=-9.1°
@@ -103,7 +103,7 @@ t=1.00s  VEL:500,-900,1571     θ_body=-90°  → 世界系方向仍为 0°
 | 参数设置 | `SET:<名>:<整数>\n` | 按参数缩放,如 `SET:MAX_SPEED:800` |
 | 差速(兼容) | `MOT:<左>,<右>\n` | 百分比 [-100,100] |
 
-**SET 缩放表(方案 A:线上整数)**
+**SET 缩放表(方案 A:线上整数)**:
 
 | 参数 | 物理单位 | 缩放 | 示例 |
 | :--- | :--- | ---: | :--- |
@@ -116,7 +116,7 @@ t=1.00s  VEL:500,-900,1571     θ_body=-90°  → 世界系方向仍为 0°
 
 ### 2.3 ★ 四轮速度反馈(二进制定长帧,11 字节)
 
-```
+```text
 字节:  [0]    [1]   [2] [3] [4] [5] [6] [7] [8] [9]   [10]
 内容:  0xAA   seq   w0    w1    w2    w3(各 int16 小端) crc8
 ```
@@ -152,7 +152,7 @@ t=1.00s  VEL:500,-900,1571     θ_body=-90°  → 世界系方向仍为 0°
 蓝牙 SPP 是**字节流**,HC-06 缓冲溢出会**静默丢弃**数据,写成功 ≠ 对端收到。
 没有 seq 就永远不知道丢了多少帧。上位机据此统计**丢帧率**:
 
-```
+```text
 期望 = (last_seq + 1) & 0xFF
 丢失 = (seq - 期望) & 0xFF      ← 掩码减法,正确处理 255→0 回绕
 ```
@@ -261,7 +261,7 @@ class ParsedMessage:
     error: str | None            # 非 None 表示解析失败
 ```
 
-**各 kind 的 params**
+**各 kind 的 params**:
 
 | kind | params 键 |
 | :--- | :--- |
@@ -574,7 +574,8 @@ BLEBackend(address: str | None = None, *, on_line=None, on_state=None)
 | 协议 | `ENCODING` / `LINE_END` | utf-8 / `"\n"` | |
 | | `SET_PARAMS` | MAX_SPEED/MAX_OMEGA ×1000 | SET 参数缩放表 |
 | | `SET_DEFAULT_SCALE` | 1 | 未登记参数缩放 |
-| UI | `VEL_UI_MAX` | 2.0 | 速度滑块上限 m/s |
+| UI | `UI_THEME` | `"dark"` | sv-ttk 主题:`dark` / `light` |
+| | `VEL_UI_MAX` | 2.0 | 速度滑块上限 m/s |
 | | `DEG_UI_MIN/MAX` | ±180 | 方向角范围 |
 | | `OMEGA_UI_MIN/MAX` | ±6.28 | 自转范围 |
 
@@ -587,6 +588,9 @@ App()            # 构造:启动 asyncio 后台线程 + 建界面
 app.mainloop()   # 阻塞运行
 main()           # 模块级入口(console_scripts 指向)
 ```
+
+> 视图构建在 `ui/layout.py`,主题/DPI/配色在 `ui/theme.py`;
+> `App` 只负责控制器逻辑(事件、异步、状态机)。
 
 | 成员 | 说明 |
 | :--- | :--- |
@@ -627,7 +631,7 @@ main()           # 模块级入口(console_scripts 指向)
 
 ### 11.2 使用方式
 
-**脚本(显式忽略接收)**
+**脚本(显式忽略接收)**:
 
 ```python
 import asyncio

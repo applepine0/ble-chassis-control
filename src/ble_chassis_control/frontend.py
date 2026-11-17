@@ -1,4 +1,7 @@
-"""tkinter 上位机界面:连接管理、底盘控制、收发日志。
+"""上位机控制器:连接管理、底盘控制、收发日志与状态机。
+
+界面构建在 ``ui/layout.py``,主题/DPI/配色在 ``ui/theme.py``;
+本模块不直接创建控件(除 TK 变量/快捷键外),便于替换视图。
 
 线程模型:
   * asyncio 事件循环运行在后台守护线程,tk 主循环在 GUI 线程;
@@ -13,25 +16,15 @@ import threading
 import time
 import tkinter as tk
 from collections import deque
-from tkinter import messagebox, ttk
-from typing import Optional
+from tkinter import messagebox
 
 from . import config
 from .backend import BLEBackend, BLEError
 from .backend_serial import SerialBackend, available_ports
-from .chart import WheelChart
 from .link import ChassisLink, LinkError
 from .motion import MotionRunner
 from .protocol import ParsedMessage, Protocol
-
-# 界面配色
-C_SYS = "#808080"
-C_TX = "#1565C0"
-C_RX = "#2E7D32"
-C_ERR = "#C62828"
-C_WARN = "#EF6C00"
-C_OK = "#2E7D32"
-C_BG = "#F5F5F5"
+from .ui.theme import apply_theme, enable_dpi_awareness
 
 MAX_LOG_LINES = 5000
 
@@ -42,11 +35,12 @@ def now() -> str:
 
 class App(tk.Tk):
     def __init__(self) -> None:
+        enable_dpi_awareness()
         super().__init__()
+        self.palette = apply_theme(self, config.UI_THEME)
         self.title("底盘上位机 — HC-05 串口 / BLE 透传控制台")
         self.geometry("900x640")
         self.minsize(780, 540)
-        self.configure(bg=C_BG)
 
         # 异步基础设施
         self.loop = asyncio.new_event_loop()
@@ -163,264 +157,10 @@ class App(tk.Tk):
     # UI
     # ------------------------------------------------------------------
     def _build_ui(self) -> None:
-        pad = {"padx": 8, "pady": 6}
-        self.columnconfigure(0, weight=1)
-        self.rowconfigure(1, weight=1)
+        """构建界面:布局在 ui/layout.py,本类只做控制器。"""
+        from .ui.layout import build_main_ui
 
-        # 顶部:链路选择 + 连接栏
-        top = ttk.Frame(self, padding=pad["padx"])
-        top.grid(row=0, column=0, sticky="ew")
-        top.columnconfigure(3, weight=1)
-
-        # 链路类型:串口(HC-05)/ BLE
-        self.link_kind = tk.StringVar(value=config.LINK_KIND)
-        ttk.Radiobutton(
-            top, text="串口 (HC-05)", value="serial",
-            variable=self.link_kind, command=self._rebuild_link,
-        ).grid(row=0, column=0, sticky="w")
-        ttk.Radiobutton(
-            top, text="BLE", value="ble",
-            variable=self.link_kind, command=self._rebuild_link,
-        ).grid(row=0, column=1, sticky="w", padx=(6, 12))
-
-        self.target_label = ttk.Label(top, text="串口:")
-        self.target_label.grid(row=0, column=2, sticky="w")
-        self.addr_var = tk.StringVar(value="")
-        self.addr_var.trace_add("write", self._remember_target)
-        ttk.Entry(top, textvariable=self.addr_var, width=22).grid(
-            row=0, column=3, sticky="ew", padx=6
-        )
-        self.refresh_btn = ttk.Button(
-            top, text="刷新口", width=8, command=self._refresh_ports
-        )
-        self.refresh_btn.grid(row=0, column=4, padx=2)
-        # 波特率下拉(串口模式下可选;必须与模块/MCU 一致)
-        self.baud_var = tk.StringVar(value=str(config.SERIAL_BAUDRATE))
-        self.baud_box = ttk.Combobox(
-            top, textvariable=self.baud_var, width=8, state="readonly",
-            values=[str(b) for b in config.SERIAL_BAUD_CHOICES],
-        )
-        self.baud_box.grid(row=0, column=5, padx=2)
-        self.btn_conn = ttk.Button(top, text="连接", command=self.on_connect)
-        self.btn_conn.grid(row=0, column=6, padx=6)
-        self.btn_disc = ttk.Button(
-            top, text="断开", command=self.on_disconnect, state="disabled"
-        )
-        self.btn_disc.grid(row=0, column=7, padx=2)
-        ttk.Button(top, text="自检", command=self.on_self_check).grid(
-            row=0, column=8, padx=2
-        )
-        self.status_var = tk.StringVar(value="未连接")
-        self.status_label = ttk.Label(
-            top, textvariable=self.status_var, foreground=C_SYS
-        )
-        self.status_label.grid(row=0, column=9, sticky="e", padx=6)
-
-        # 第二行:串口列表/提示
-        self.port_hint = tk.StringVar(value="")
-        ttk.Label(top, textvariable=self.port_hint, foreground=C_SYS).grid(
-            row=1, column=0, columnspan=10, sticky="w", pady=(4, 0)
-        )
-        self._sync_target_field()
-
-        # 中部:控制 + 日志
-        mid = ttk.Frame(self, padding=8)
-        mid.grid(row=1, column=0, sticky="nsew")
-        mid.columnconfigure(1, weight=1)
-        mid.rowconfigure(0, weight=1)
-
-        ctrl = ttk.LabelFrame(mid, text=" 底盘控制 (速度矢量) ", padding=8)
-        ctrl.grid(row=0, column=0, sticky="n", padx=(0, 8))
-        ctrl.columnconfigure(1, weight=1)
-
-        # 速度大小 m/s
-        ttk.Label(ctrl, text="速度 m/s").grid(row=0, column=0, sticky="w")
-        self.speed_var = tk.DoubleVar(value=0.0)
-        ttk.Scale(
-            ctrl,
-            from_=0, to=config.VEL_UI_MAX, variable=self.speed_var,
-            length=190, command=self._scale_drag,
-        ).grid(row=0, column=1, padx=6, pady=4)
-        ttk.Spinbox(
-            ctrl, from_=0, to=config.VEL_UI_MAX, increment=0.05,
-            textvariable=self.speed_var, width=7,
-        ).grid(row=0, column=2)
-
-        # 方向角 deg(协议不定义参考系;此处 UI 按车头坐标系、0°=正前、逆时针为正)
-        ttk.Label(ctrl, text="方向 deg").grid(row=1, column=0, sticky="w", pady=(6, 0))
-        self.deg_var = tk.DoubleVar(value=0.0)
-        ttk.Scale(
-            ctrl,
-            from_=config.DEG_UI_MIN, to=config.DEG_UI_MAX, variable=self.deg_var,
-            length=190, command=self._scale_drag,
-        ).grid(row=1, column=1, padx=6, pady=4)
-        ttk.Spinbox(
-            ctrl, from_=config.DEG_UI_MIN, to=config.DEG_UI_MAX, increment=5.0,
-            textvariable=self.deg_var, width=7,
-        ).grid(row=1, column=2)
-
-        # 自转角速度 rad/s
-        ttk.Label(ctrl, text="自转 rad/s").grid(row=2, column=0, sticky="w", pady=(6, 0))
-        self.omega_var = tk.DoubleVar(value=0.0)
-        ttk.Scale(
-            ctrl,
-            from_=config.OMEGA_UI_MIN, to=config.OMEGA_UI_MAX, variable=self.omega_var,
-            length=190, command=self._scale_drag,
-        ).grid(row=2, column=1, padx=6, pady=4)
-        ttk.Spinbox(
-            ctrl, from_=config.OMEGA_UI_MIN, to=config.OMEGA_UI_MAX, increment=0.1,
-            textvariable=self.omega_var, width=7,
-        ).grid(row=2, column=2)
-
-        ttk.Label(
-            ctrl, text="(UI 约定:车头坐标系,0°=正前,逆时针为正)",
-            foreground=C_SYS, font=("", 8),
-        ).grid(row=3, column=0, columnspan=3, sticky="w", pady=(2, 0))
-
-        btns = ttk.Frame(ctrl)
-        btns.grid(row=4, column=0, columnspan=3, pady=10, sticky="ew")
-        self.btn_mot = ttk.Button(btns, text="发送一次", command=self.on_send_vel)
-        self.btn_mot.pack(side="left", expand=True, fill="x", padx=(4, 6))
-        self.btn_stop = tk.Button(
-            btns, text="急停 (Esc)", command=self.on_stop,
-            bg="#C62828", fg="white", activebackground="#8E1B1B",
-            activeforeground="white", font=("", 10, "bold"),
-            width=12, relief="raised", bd=2,
-        )
-        self.btn_stop.pack(side="right", padx=(0, 4))
-
-        # --- 定频运动下发(θ 按 ω 累积)---
-        motion = ttk.LabelFrame(ctrl, text=" 旋转前进(定频下发) ", padding=6)
-        motion.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(4, 0))
-        motion.columnconfigure(3, weight=1)
-
-        ttk.Label(motion, text="频率 Hz").grid(row=0, column=0, sticky="w")
-        self.rate_var = tk.DoubleVar(value=config.MOTION_RATE_HZ)
-        ttk.Spinbox(
-            motion, from_=config.MOTION_RATE_MIN, to=config.MOTION_RATE_MAX,
-            increment=1.0, textvariable=self.rate_var, width=6,
-        ).grid(row=0, column=1, padx=(4, 10))
-        self.motion_state = tk.StringVar(value="未运行")
-        ttk.Label(motion, textvariable=self.motion_state,
-                  foreground=C_SYS).grid(row=0, column=3, sticky="e")
-
-        mbtns = ttk.Frame(motion)
-        mbtns.grid(row=1, column=0, columnspan=4, sticky="ew", pady=(6, 0))
-        self.btn_motion_start = ttk.Button(
-            mbtns, text="启动运动", command=self.on_motion_start
-        )
-        self.btn_motion_start.pack(side="left", expand=True, fill="x", padx=3)
-        self.btn_motion_stop = ttk.Button(
-            mbtns, text="停止运动", command=self.on_motion_stop, state="disabled"
-        )
-        self.btn_motion_stop.pack(side="left", expand=True, fill="x", padx=3)
-
-        ttk.Label(
-            motion,
-            text="启动后按频率持续下发 θ(t)=θ₀−∫ω·dt(默认反向补偿车体自转)",
-            foreground=C_SYS, font=("", 8),
-        ).grid(row=2, column=0, columnspan=4, sticky="w", pady=(4, 0))
-
-        ttk.Separator(ctrl).grid(row=6, column=0, columnspan=3, sticky="ew", pady=6)
-
-        # 通用 SET 命令(方案 A:物理值 → ×scale 整数)
-        ttk.Label(ctrl, text="SET 命令:").grid(row=7, column=0, sticky="w")
-        self.set_name = ttk.Combobox(
-            ctrl, values=list(config.SET_PARAMS), width=10,
-        )
-        self.set_name.grid(row=7, column=1, sticky="ew", padx=6)
-        self.set_name.set("MAX_SPEED")
-        self.set_val = ttk.Entry(ctrl, width=8)
-        self.set_val.grid(row=7, column=2)
-        self.set_val.insert(0, "0.8")
-        self.set_hint_var = tk.StringVar(value="")
-        ttk.Label(
-            ctrl, textvariable=self.set_hint_var, foreground=C_SYS, font=("", 8),
-        ).grid(row=8, column=0, columnspan=3, sticky="w")
-        self.set_name.bind("<<ComboboxSelected>>", lambda _e: self._update_set_hint())
-        self.set_name.bind("<KeyRelease>", lambda _e: self._update_set_hint())
-        self.set_val.bind("<KeyRelease>", lambda _e: self._update_set_hint())
-        self.btn_set = ttk.Button(ctrl, text="发送 SET", command=self.on_send_set)
-        self.btn_set.grid(row=9, column=0, columnspan=3, sticky="ew", pady=(6, 8))
-
-        # 手动透传行
-        ttk.Label(ctrl, text="手动发送:").grid(row=10, column=0, sticky="w")
-        self.raw_var = tk.StringVar()
-        ttk.Entry(ctrl, textvariable=self.raw_var).grid(
-            row=10, column=1, columnspan=2, sticky="ew", padx=6
-        )
-        self.btn_raw = ttk.Button(ctrl, text="发送", command=self.on_send_raw)
-        self.btn_raw.grid(row=11, column=0, columnspan=3, sticky="ew", pady=8)
-        self._update_set_hint()
-
-        # 右侧:日志 + 转速曲线
-        right = ttk.Frame(mid)
-        right.grid(row=0, column=1, sticky="nsew")
-        right.columnconfigure(0, weight=1)
-        right.rowconfigure(0, weight=1)     # 日志占主要空间
-        right.rowconfigure(1, weight=0)     # 曲线固定高度
-
-        logf = ttk.LabelFrame(right, text=" 通信日志 ", padding=4)
-        logf.grid(row=0, column=0, sticky="nsew")
-        logf.columnconfigure(0, weight=1)
-        logf.rowconfigure(0, weight=1)
-
-        self.log = tk.Text(
-            logf, state="disabled", wrap="word",
-            font=("Consolas", 10), bg="#FFFFFF",
-        )
-        self.log.grid(row=0, column=0, sticky="nsew")
-        sb = ttk.Scrollbar(logf, command=self.log.yview)
-        sb.grid(row=0, column=1, sticky="ns")
-        self.log.configure(yscrollcommand=sb.set)
-        for tag, color in (("sys", C_SYS), ("tx", C_TX), ("rx", C_RX), ("err", C_ERR)):
-            self.log.tag_configure(tag, foreground=color)
-
-        self.autoscroll_var = tk.BooleanVar(value=True)
-        logbar = ttk.Frame(logf)
-        logbar.grid(row=1, column=0, columnspan=2, sticky="ew", pady=4)
-        ttk.Checkbutton(
-            logbar, text="自动滚动", variable=self.autoscroll_var
-        ).pack(side="left")
-        ttk.Button(
-            logbar, text="清空日志", width=10, command=self.clear_log
-        ).pack(side="right")
-
-        # 四轮转速实时曲线
-        chartf = ttk.LabelFrame(right, text=" 四轮转速曲线 ", padding=4)
-        chartf.grid(row=1, column=0, sticky="ew", pady=(6, 0))
-        chartf.columnconfigure(0, weight=1)
-        self.chart = WheelChart(
-            chartf,
-            names=config.WHEEL_NAMES,
-            unit=config.WHEEL_SPEED_UNIT,
-            maxlen=config.CHART_MAXLEN,
-            redraw_ms=config.CHART_REDRAW_MS,
-            height=config.CHART_HEIGHT,
-        )
-        self.chart.grid(row=0, column=0, sticky="ew")
-
-        # 底部:四轮速度反馈 + 链路健康度
-        bottom = ttk.Frame(self, padding=(8, 0))
-        bottom.grid(row=2, column=0, sticky="ew")
-        bottom.columnconfigure(0, weight=1)
-
-        self.wheel_var = tk.StringVar(value="四轮速度: (无反馈)")
-        ttk.Label(
-            bottom, textvariable=self.wheel_var,
-            font=("Consolas", 10),
-        ).grid(row=0, column=0, sticky="w", pady=2)
-
-        self.link_health_var = tk.StringVar(value="")
-        ttk.Label(bottom, textvariable=self.link_health_var, foreground=C_SYS).grid(
-            row=1, column=0, sticky="w"
-        )
-
-        # 链路详情(GATT 树 / 串口参数)
-        self.info_var = tk.StringVar(value="(未连接)")
-        ttk.Label(self, textvariable=self.info_var, foreground=C_SYS).grid(
-            row=3, column=0, sticky="w", padx=8, pady=4
-        )
+        build_main_ui(self)
 
     # ------------------------------------------------------------------
     # 事件处理
@@ -525,14 +265,14 @@ class App(tk.Tk):
         self.log_sys(f"连接目标:{self.backend.kind} / {self.backend.target or '(自动)'}")
         self.btn_conn.configure(state="disabled")
         self.btn_disc.configure(state="disabled")
-        self._set_status("连接中 ...", C_WARN)
+        self._set_status("连接中 ...", self.palette.warn)
         self._submit(
             self.backend.connect(),
             # 注意:成功回调只调 _set_connected —— 不能带 _ready_buttons,
             # 那会把连接按钮错误地恢复为可点(实测 bug)
             on_success=lambda _r: self._set_connected(),
             on_error=lambda err: (
-                self._set_status("连接失败", C_ERR),
+                self._set_status("连接失败", self.palette.err),
                 self.log_err(err),
                 self._ready_buttons(),
             ),
@@ -544,7 +284,7 @@ class App(tk.Tk):
             self.motion.stop()
             self.log_sys("断开前:已终止运动下发,等待 STOP 下发 ...")
             self.btn_disc.configure(state="disabled")
-            self._set_status("断开中 ...", C_WARN)
+            self._set_status("断开中 ...", self.palette.warn)
             self._submit(
                 self._disconnect_after_motion(),
                 on_success=lambda _r: self._set_disconnected(),
@@ -596,12 +336,12 @@ class App(tk.Tk):
         address = self.addr_var.get().strip().upper()
         self.backend.address = address  # type: ignore[attr-defined]
         self.log_sys(f"自检:扫描 {address} (8s)...")
-        self._set_status("自检中 ...", C_WARN)
+        self._set_status("自检中 ...", self.palette.warn)
         self._submit(
             self._do_self_check(),
-            on_success=lambda _r: self._set_status("未连接", C_SYS),
+            on_success=lambda _r: self._set_status("未连接", self.palette.muted),
             on_error=lambda err: (
-                self._set_status("自检失败", C_ERR),
+                self._set_status("自检失败", self.palette.err),
                 self.log_err(err),
             ),
         )
@@ -621,7 +361,7 @@ class App(tk.Tk):
                     f"发现 {addr}  name={dev.name!r} RSSI={adv.rssi} service=[{uuids}]"
                 )
         if hits == 0:
-            self._set_status("未发现目标模块", C_ERR)
+            self._set_status("未发现目标模块", self.palette.err)
             self.log_err(
                 f"未发现 {target}(或名 JDY-23):请确认模块已上电并在广播;"
                 "若在广播仍连不上,按 README 排查清单检查占用/休眠/iBeacon"
@@ -786,15 +526,15 @@ class App(tk.Tk):
             self._set_connected()
         elif "连接中断" in text or "意外断开" in text:
             self._reconnecting = True
-            self._set_status("链路中断,等待重连 ...", C_ERR)
+            self._set_status("链路中断,等待重连 ...", self.palette.err)
             self.btn_conn.configure(state="disabled")
             self.btn_disc.configure(state="normal")
         elif "自动重连" in text:
             self._reconnecting = True
             if "失败" in text:
-                self._set_status("自动重连失败,继续重试 ...", C_ERR)
+                self._set_status("自动重连失败,继续重试 ...", self.palette.err)
             else:
-                self._set_status("自动重连中 ...", C_WARN)
+                self._set_status("自动重连中 ...", self.palette.warn)
             self.btn_conn.configure(state="disabled")
             self.btn_disc.configure(state="normal")
         elif "已断开" in text or "串口已关闭" in text:
@@ -802,7 +542,7 @@ class App(tk.Tk):
                 self._set_disconnected()
         elif "打开串口第" in text or "连接第" in text:
             self._set_status(
-                "自动重连中 ..." if self._reconnecting else "连接中 ...", C_WARN
+                "自动重连中 ..." if self._reconnecting else "连接中 ...", self.palette.warn
             )
 
     def _poll_queues(self) -> None:
@@ -831,7 +571,7 @@ class App(tk.Tk):
                 elif kind == "err":
                     self.log_err(payload)
                     if not self._reconnecting:
-                        self._set_status("错误", C_ERR)
+                        self._set_status("错误", self.palette.err)
                 elif kind == "ui":
                     payload()
         except queue.Empty:
@@ -859,31 +599,31 @@ class App(tk.Tk):
         self.btn_conn.configure(state="normal")
         self.btn_disc.configure(state="disabled")
 
-    def _set_status(self, text: str, color: str = C_SYS) -> None:
+    def _set_status(self, text: str, color: str | None = None) -> None:
         """更新状态栏文字与颜色。"""
         self.status_var.set(text)
         try:
-            self.status_label.configure(foreground=color)
+            self.status_label.configure(foreground=color or self.palette.muted)
         except tk.TclError:
             pass
 
     def _set_connected(self) -> None:
         self._reconnecting = False
         if self.backend.kind == "ble":
-            self._set_status(f"已连接 (MTU={self.backend.mtu})", C_OK)
+            self._set_status(f"已连接 (MTU={self.backend.mtu})", self.palette.ok)
         else:
             port = getattr(self.backend, "port", "")
             if port:
                 self.addr_var.set(port)
                 self._last_serial_port = port
-            self._set_status(f"已连接 ({self.backend.target})", C_OK)
+            self._set_status(f"已连接 ({self.backend.target})", self.palette.ok)
         self.btn_conn.configure(state="disabled")
         self.btn_disc.configure(state="normal")
         self.info_var.set(self.backend.detail_text or "(无链路详情)")
 
     def _set_disconnected(self) -> None:
         self._reconnecting = False
-        self._set_status("未连接", C_SYS)
+        self._set_status("未连接", self.palette.muted)
         self.btn_conn.configure(state="normal")
         self.btn_disc.configure(state="disabled")
         self.info_var.set("(未连接)")

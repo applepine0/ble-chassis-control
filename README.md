@@ -2,7 +2,7 @@
 
 底盘上位机:支持 **HC-05 串口(经典蓝牙 SPP)** 与 **BLE** 双链路,实现控制指令下发与数据回传显示。
 
-- 技术栈:Python 3.13 + tkinter;串口用 pyserial、BLE 用 Bleak;uv 管理,src layout
+- 技术栈:Python 3.13 + tkinter/ttk + **sv-ttk 主题**;串口用 pyserial、BLE 用 Bleak;uv 管理,src layout
 - 硬件:HC-05(经典蓝牙,**推荐**)/ BLE 模块 + USB-TTL,电脑自带蓝牙
 
 ---
@@ -196,11 +196,14 @@ src/ble_chassis_control/
 ├── link.py            # 链路抽象基类 ChassisLink(统一 BLE 与串口的接口)
 ├── backend.py         # BLE 后端(Bleak):扫描→连接→UUID 自动解析→收发
 ├── backend_serial.py  # 串口后端(pyserial):HC-05/06 / USB-TTL,读线程+自动重连
-├── frontend.py        # tkinter 界面(速度/方向/自转 三控件 + 日志)
+├── frontend.py        # 控制器:连接/运动/日志/状态(事件与异步)
+├── ui/
+│   ├── theme.py       # sv-ttk 主题 / DPI / 字体 / Palette
+│   └── layout.py      # 纯控件构建(视图层,不处理业务)
 └── __main__.py        # python -m 入口
 ```
 
-**架构要点**:前端只依赖 `ChassisLink` 抽象 —— 换链路(串口 ↔ BLE)或换模块只需增删一个后端实现,**前端零修改**;换底盘类型只需改 MCU 逆解,**协议与上位机零修改**。
+**架构要点**:视图(`ui/layout.py`)、主题(`ui/theme.py`)、控制器(`frontend.py`)、链路抽象(`ChassisLink`)分层;换链路(串口 ↔ BLE)或换模块只需增删一个后端实现,**前端零修改**;换底盘类型只需改 MCU 逆解,**协议与上位机零修改**。
 
 ## BLE 连接诊断结论(实测,2025-10)
 

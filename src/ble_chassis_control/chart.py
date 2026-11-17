@@ -47,6 +47,11 @@ class WheelChart(ttk.Frame):
         maxlen: int = 600,          # 保留最近 N 个采样(600 @100Hz = 6 秒)
         redraw_ms: int = 50,        # 重绘节流
         height: int = 150,
+        colors: tuple[str, ...] | None = None,
+        bg: str = C_BG,
+        grid: str = C_GRID,
+        axis: str = C_AXIS,
+        text: str = C_TEXT,
         **kwargs,
     ) -> None:
         super().__init__(master, **kwargs)
@@ -54,6 +59,11 @@ class WheelChart(ttk.Frame):
         self.unit = unit
         self.maxlen = maxlen
         self.redraw_ms = redraw_ms
+        self.colors = tuple(colors or WHEEL_COLORS)
+        self._bg = bg
+        self._grid = grid
+        self._axis = axis
+        self._text = text
 
         self._series: list[deque[float]] = [
             deque(maxlen=maxlen) for _ in names
@@ -70,7 +80,7 @@ class WheelChart(ttk.Frame):
         # 顶部:图例 + 控制
         top = ttk.Frame(self)
         top.grid(row=0, column=0, sticky="ew", pady=(0, 2))
-        for i, (name, color) in enumerate(zip(names, WHEEL_COLORS)):
+        for i, (name, color) in enumerate(zip(names, self.colors)):
             # 注意:ttk.Frame 不支持 cget("background")(styled widget),
             # 故图例色块用 tk.Label,背景由父容器继承(不显式设置)。
             tk.Label(top, text="■", fg=color, font=("", 11)).grid(
@@ -84,13 +94,13 @@ class WheelChart(ttk.Frame):
         ttk.Button(top, text="清空", width=6, command=self.clear).grid(
             row=0, column=31
         )
-        ttk.Label(top, textvariable=self._frozen_var, foreground=C_AXIS).grid(
+        ttk.Label(top, textvariable=self._frozen_var, foreground=self._axis).grid(
             row=0, column=32, padx=(8, 0)
         )
 
         # 画布
         self.canvas = tk.Canvas(
-            self, height=height, bg=C_BG, highlightthickness=0
+            self, height=height, bg=self._bg, highlightthickness=0
         )
         self.canvas.grid(row=1, column=0, sticky="nsew")
         self.canvas.bind("<Configure>", lambda _e: self._draw(force=True))
@@ -167,14 +177,14 @@ class WheelChart(ttk.Frame):
         for k in range(5):
             y = h * k / 4
             v = hi - (hi - lo) * k / 4
-            c.create_line(0, y, w, y, fill=C_GRID)
-            c.create_text(4, y + 6, anchor="w", fill=C_TEXT,
+            c.create_line(0, y, w, y, fill=self._grid)
+            c.create_text(4, y + 6, anchor="w", fill=self._text,
                           text=f"{v:+.0f}", font=("Consolas", 7))
 
         # 零线加粗
         if lo <= 0 <= hi:
             y0 = to_y(0.0)
-            c.create_line(0, y0, w, y0, fill=C_AXIS, dash=(4, 3))
+            c.create_line(0, y0, w, y0, fill=self._axis, dash=(4, 3))
 
         # 曲线
         steps = w - 1
@@ -190,9 +200,9 @@ class WheelChart(ttk.Frame):
                     x = k * w / min(steps, n - 1) if min(steps, n - 1) else 0
                     pts.extend((x, to_y(dq[pos])))
             if len(pts) >= 4:
-                c.create_line(*pts, fill=WHEEL_COLORS[idx % len(WHEEL_COLORS)],
+                c.create_line(*pts, fill=self.colors[idx % len(self.colors)],
                               width=1, smooth=False)
 
         # 单位标注
-        c.create_text(w - 4, 8, anchor="ne", fill=C_TEXT, text=self.unit,
+        c.create_text(w - 4, 8, anchor="ne", fill=self._text, text=self.unit,
                       font=("Consolas", 8))
