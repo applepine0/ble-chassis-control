@@ -259,6 +259,7 @@ def build_main_ui(app) -> None:
         grid=app.palette.chart_grid,
         axis=app.palette.chart_axis,
         text=app.palette.chart_text,
+        on_expand=app.on_expand_chart,
     )
     app.chart.grid(row=0, column=0, sticky="ew")
 

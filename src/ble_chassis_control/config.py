@@ -72,7 +72,7 @@ ENCODING = "utf-8"
 LINE_END = "\n"
 
 # 界面主题:sv-ttk 的 "dark" / "light"
-UI_THEME = "dark"
+UI_THEME = "light"
 
 # --- SET 参数缩放(方案 A:线上整数,按参数缩放)-------------------------
 # 上位机输入物理值(如 0.8 m/s),编码时 ×scale 取整为整数;

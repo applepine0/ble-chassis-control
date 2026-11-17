@@ -459,7 +459,9 @@ WheelChart(master, *,
            unit="rpm",                        # 纵轴单位标注
            maxlen=600,                        # 环形缓冲容量(采样点数)
            redraw_ms=50,                      # 重绘节流(ms)→ 20fps
-           height=150)                        # 画布高度(px)
+           height=150,                        # 画布高度(px)
+           colors=None, bg=..., grid=..., axis=..., text=...,  # 主题配色
+           on_expand=None)                    # “放大”按钮回调(可选)
 ```
 
 ### 6.2 方法
@@ -467,6 +469,7 @@ WheelChart(master, *,
 ```python
 chart.push((120.0, -250.0, 0.0, 385.0))   # 推入一帧四轮转速(w0..w3 顺序)
 chart.clear()                              # 清空曲线
+chart.copy_data_from(other)                # 复制另一张曲线的历史数据
 chart.maybe_redraw()                       # 由主循环定期调用(内部按 redraw_ms 节流)
 ```
 
@@ -574,7 +577,7 @@ BLEBackend(address: str | None = None, *, on_line=None, on_state=None)
 | 协议 | `ENCODING` / `LINE_END` | utf-8 / `"\n"` | |
 | | `SET_PARAMS` | MAX_SPEED/MAX_OMEGA ×1000 | SET 参数缩放表 |
 | | `SET_DEFAULT_SCALE` | 1 | 未登记参数缩放 |
-| UI | `UI_THEME` | `"dark"` | sv-ttk 主题:`dark` / `light` |
+| UI | `UI_THEME` | `"light"` | sv-ttk 主题:`dark` / `light` |
 | | `VEL_UI_MAX` | 2.0 | 速度滑块上限 m/s |
 | | `DEG_UI_MIN/MAX` | ±180 | 方向角范围 |
 | | `OMEGA_UI_MIN/MAX` | ±6.28 | 自转范围 |
@@ -607,6 +610,7 @@ main()           # 模块级入口(console_scripts 指向)
 | `on_send_vel()` | 发送速度矢量 |
 | `on_stop()` | 急停(按钮或 `Esc`) |
 | `on_send_set()` / `on_send_raw()` | SET / 手动行(按 `config.SET_PARAMS` 自动缩放) |
+| `on_expand_chart()` | 打开/聚焦独立放大的四轮转速曲线窗口 |
 | `on_self_check()` | 自检(串口列表 / BLE 扫描) |
 | `log_sys/tx/rx/err(text)` | 写日志 |
 

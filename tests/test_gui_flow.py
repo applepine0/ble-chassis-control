@@ -240,6 +240,20 @@ def run() -> None:
             fe.MAX_LOG_LINES = old_max
         print("14) 日志行数上限: OK")
 
+        # 15) 放大曲线:独立窗口继承主图数据,可继续推送,关闭后释放
+        app.chart.push((1.0, 2.0, 3.0, 4.0))
+        app.on_expand_chart()
+        pump(app, 0.3)
+        assert app.chart_window is not None
+        assert len(app.chart_window.chart._series[0]) >= 1
+        app.chart_window.push((5.0, 6.0, 7.0, 8.0))
+        pump(app, 0.2)
+        assert app.chart_window.chart._series[0][-1] == 5.0
+        app.chart_window.close()
+        pump(app, 0.2)
+        assert app.chart_window is None
+        print("15) 放大曲线独立窗口: OK")
+
         print("\nGUI 功能测试(模拟链路)全部通过 ✓")
     finally:
         app.on_close()

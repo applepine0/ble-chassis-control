@@ -17,6 +17,7 @@ import time
 import tkinter as tk
 from collections import deque
 from tkinter import ttk
+from typing import Callable
 
 # 四轮配色(与轮序 w0~w3 对应)
 WHEEL_COLORS = ("#D32F2F", "#1976D2", "#388E3C", "#F57C00")  # 右前 左前 左后 右后
@@ -52,6 +53,7 @@ class WheelChart(ttk.Frame):
         grid: str = C_GRID,
         axis: str = C_AXIS,
         text: str = C_TEXT,
+        on_expand: Callable[[], None] | None = None,
         **kwargs,
     ) -> None:
         super().__init__(master, **kwargs)
@@ -91,6 +93,10 @@ class WheelChart(ttk.Frame):
             top, text="自动量程", variable=self._auto_scale,
             command=self._on_toggle_scale,
         ).grid(row=0, column=30, padx=(6, 6))
+        if on_expand is not None:
+            ttk.Button(top, text="放大", width=6, command=on_expand).grid(
+                row=0, column=29, padx=(6, 0)
+            )
         ttk.Button(top, text="清空", width=6, command=self.clear).grid(
             row=0, column=31
         )
@@ -121,6 +127,17 @@ class WheelChart(ttk.Frame):
             dq.clear()
         self._dirty = True
         self._frozen_var.set("(无数据)")
+        self._draw(force=True)
+
+    def copy_data_from(self, other: "WheelChart") -> None:
+        """复制另一张曲线的数据(用于打开放大窗口时继承已有波形)。"""
+        for dst, src in zip(self._series, other._series):
+            dst.clear()
+            dst.extend(src)
+        self._last_push = other._last_push
+        self._dirty = True
+        if any(self._series):
+            self._frozen_var.set("")
         self._draw(force=True)
 
     # ------------------------------------------------------------------

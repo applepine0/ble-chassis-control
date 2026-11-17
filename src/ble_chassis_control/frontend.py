@@ -60,6 +60,7 @@ class App(tk.Tk):
         self._frame_times: deque[float] = deque(maxlen=100)
         self._wheel_hz = 0.0
         self._last_stats = None
+        self.chart_window = None            # 独立放大曲线窗口
 
         self._build_ui()
         self.bind("<Escape>", self._on_escape)
@@ -102,6 +103,29 @@ class App(tk.Tk):
             self._wheel_hz = (len(self._frame_times) - 1) / span if span > 0 else 0.0
         # 推入曲线(高频调用,内部有节流重绘)
         self.chart.push(frame.speeds)
+        if self.chart_window is not None:
+            self.chart_window.push(frame.speeds)
+
+    def on_expand_chart(self) -> None:
+        """打开/聚焦独立放大的四轮转速曲线窗口。"""
+        if self.chart_window is not None:
+            self.chart_window.lift()
+            self.chart_window.focus_force()
+            return
+        from .ui.chart_window import ChartWindow
+
+        self.chart_window = ChartWindow(
+            self,
+            palette=self.palette,
+            on_close=self._on_chart_window_closed,
+            maxlen=max(config.CHART_MAXLEN, 1200),
+            height=520,
+        )
+        self.chart_window.copy_data_from(self.chart)
+        self.log_sys("曲线已放大为独立窗口")
+
+    def _on_chart_window_closed(self) -> None:
+        self.chart_window = None
 
     def _show_link_stats(self, stats) -> None:
         """链路健康度:丢帧率 / CRC 错误 / 杂散 / 实测帧率。"""
@@ -678,6 +702,12 @@ class App(tk.Tk):
         except Exception:
             pass
         self.loop.call_soon_threadsafe(self.loop.stop)
+        if self.chart_window is not None:
+            try:
+                self.chart_window.close()
+            except Exception:
+                pass
+            self.chart_window = None
         self.destroy()
 
     async def _shutdown_sequence(self) -> None:
