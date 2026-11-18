@@ -29,6 +29,8 @@ from .protocol import ParsedMessage, Protocol
 from .ui.theme import Palette, apply_theme, enable_dpi_awareness
 
 if TYPE_CHECKING:
+    from concurrent.futures import Future as ConcurrentFuture
+
     from .chart import WheelChart
     from .protocol import LinkStats
     from .ui.chart_window import ChartWindow
@@ -123,15 +125,19 @@ class App(tk.Tk):
     # ------------------------------------------------------------------
     def _make_link(self, kind: str) -> ChassisLink:
         """按类型创建链路对象(BLE / 串口),并挂上四轮速度帧回调。"""
-        kwargs = dict(
+        if kind == "ble":
+            return BLEBackend(
+                on_line=self._on_line_cb,
+                on_state=self._on_state_cb,
+                on_wheel=self._on_wheel_cb,
+                on_stats=self._on_stats_cb,
+            )
+        return SerialBackend(
             on_line=self._on_line_cb,
             on_state=self._on_state_cb,
             on_wheel=self._on_wheel_cb,
             on_stats=self._on_stats_cb,
         )
-        if kind == "ble":
-            return BLEBackend(**kwargs)
-        return SerialBackend(**kwargs)
 
     # ------------------------------------------------------------------
     # 四轮速度反馈(二进制帧)回调 —— 后台线程,经队列送 GUI
@@ -165,14 +171,14 @@ class App(tk.Tk):
             return
         from .ui.chart_window import ChartWindow
 
-        self.chart_window = ChartWindow(
+        self.chart_window = win = ChartWindow(
             self,
             palette=self.palette,
             on_close=self._on_chart_window_closed,
             maxlen=max(config.CHART_MAXLEN, 1200),
             height=520,
         )
-        self.chart_window.copy_data_from(self.chart)
+        win.copy_data_from(self.chart)
         self.log_sys("曲线已放大为独立窗口")
 
     def _on_chart_window_closed(self) -> None:
@@ -206,23 +212,26 @@ class App(tk.Tk):
         """把协程提交到后台事件循环;结果/异常经线程安全队列送回 GUI 线程。"""
         fut = asyncio.run_coroutine_threadsafe(coro, self.loop)
 
-        def done(f: asyncio.Future) -> None:  # 在事件循环线程执行
+        def done(f: ConcurrentFuture) -> None:  # 在事件循环线程执行
             try:
                 result = f.result()
                 if on_success is not None:
-                    self.rx_queue.put(("ui", lambda r=result: on_success(r)))
+                    cb = on_success
+                    self.rx_queue.put(("ui", lambda r=result: cb(r)))
             except BLEError as exc:
                 # 注意:必须在 lambda 创建时绑定值 —— except 变量在块结束时会被
                 # Python 3 销毁,延迟引用会抛 NameError(实测踩过)
                 err = str(exc)
                 if on_error is not None:
-                    self.rx_queue.put(("ui", lambda e=err: on_error(e)))
+                    cb = on_error
+                    self.rx_queue.put(("ui", lambda e=err: cb(e)))
                 else:
                     self.rx_queue.put(("err", err))
             except Exception as exc:  # noqa: BLE001
                 err = f"{type(exc).__name__}: {exc}"
                 if on_error is not None:
-                    self.rx_queue.put(("ui", lambda e=err: on_error(e)))
+                    cb = on_error
+                    self.rx_queue.put(("ui", lambda e=err: cb(e)))
                 else:
                     self.rx_queue.put(("err", err))
 
@@ -422,7 +431,7 @@ class App(tk.Tk):
     async def _do_self_check(self) -> None:
         from bleak import BleakScanner
 
-        target = self.backend.address
+        target = getattr(self.backend, "address", "")
         devices = await BleakScanner.discover(timeout=8.0, return_adv=True)
         hits = 0
         for addr, (dev, adv) in devices.items():
@@ -500,7 +509,7 @@ class App(tk.Tk):
             messagebox.showwarning("输入错误", "频率必须大于 0")
             return
 
-        self.motion = MotionRunner(
+        self.motion = motion = MotionRunner(
             self.backend,
             v=v,
             theta0=theta0,
@@ -516,7 +525,7 @@ class App(tk.Tk):
             f"启动运动:v={v:g} m/s, θ₀={theta0:g}°, ω={omega:g} rad/s, {rate:g}Hz(θ 将按 ω 累积)"
         )
         self._submit(
-            self.motion.run(),
+            motion.run(),
             on_success=lambda elapsed: self._on_motion_finished(elapsed),
             on_error=lambda err: (
                 self.log_err(f"运动异常:{err}"),
