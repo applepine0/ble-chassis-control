@@ -36,6 +36,7 @@
 
 注意:MCU 端与 PC 端必须使用一致的换行与编码(默认 utf-8)。
 """
+
 from __future__ import annotations
 
 import re
@@ -58,23 +59,23 @@ SPEED_MIN, SPEED_MAX = -100.0, 100.0
 # ---------------------------------------------------------------------------
 # 二进制四轮速度帧(方案 B)
 # ---------------------------------------------------------------------------
-FRAME_HEAD = 0xAA          # 帧头
-FRAME_LEN = 11             # 帧总长:1+1+8+1
-WHEEL_COUNT = 4            # 轮数
-_WHEEL_FMT = "<4h"         # 4 个 int16 小端
+FRAME_HEAD = 0xAA  # 帧头
+FRAME_LEN = 11  # 帧总长:1+1+8+1
+WHEEL_COUNT = 4  # 轮数
+_WHEEL_FMT = "<4h"  # 4 个 int16 小端
 
 # ---------------------------------------------------------------------------
 # VEL 定点缩放与范围
 #   物理值 × SCALE_xxx = 线上整数值(四舍五入)
 # ---------------------------------------------------------------------------
-SCALE_V = 1000        # m/s    → mm/s
-SCALE_DEG = 10        # deg    → 0.1°
-SCALE_OMEGA = 1000    # rad/s  → mrad/s
+SCALE_V = 1000  # m/s    → mm/s
+SCALE_DEG = 10  # deg    → 0.1°
+SCALE_OMEGA = 1000  # rad/s  → mrad/s
 
 # 线上整数范围(int16;留 0.1% 余量避免边界溢出)
-VEL_MIN, VEL_MAX = 0, 32767                       # mm/s   : 0 ~ 32.767 m/s
-DEG_MIN, DEG_MAX = -32768, 32767                  # 0.1°   : -3276.8° ~ +3276.7°
-OMEGA_MIN, OMEGA_MAX = -32768, 32767              # mrad/s : ±32.767 rad/s
+VEL_MIN, VEL_MAX = 0, 32767  # mm/s   : 0 ~ 32.767 m/s
+DEG_MIN, DEG_MAX = -32768, 32767  # 0.1°   : -3276.8° ~ +3276.7°
+OMEGA_MIN, OMEGA_MAX = -32768, 32767  # mrad/s : ±32.767 rad/s
 
 
 def _fmt(value: float) -> str:
@@ -96,11 +97,11 @@ def _fixed(value: float, scale: int, lo: int, hi: int) -> int:
 class ParsedMessage:
     """从一行文本解析出的消息。"""
 
-    raw: str                      # 原始行(不含换行)
-    kind: str = "text"            # vel|mot|stop|set|tel|text|unknown
-    command: str | None = None    # 下发指令标签(小写)
+    raw: str  # 原始行(不含换行)
+    kind: str = "text"  # vel|mot|stop|set|tel|text|unknown
+    command: str | None = None  # 下发指令标签(小写)
     params: dict[str, Any] = field(default_factory=dict)  # 结构化字段
-    error: str | None = None      # 解析错误说明(非 None 表示无法结构化解析)
+    error: str | None = None  # 解析错误说明(非 None 表示无法结构化解析)
 
 
 class Protocol:
@@ -134,9 +135,9 @@ class Protocol:
     @staticmethod
     def encode_mot(left: float, right: float) -> bytes:
         """差速底盘速度命令(兼容旧接口)。速度单位:% ,范围 [-100,100]。"""
-        l = _clamp(float(left), SPEED_MIN, SPEED_MAX)
+        left_val = _clamp(float(left), SPEED_MIN, SPEED_MAX)
         r = _clamp(float(right), SPEED_MIN, SPEED_MAX)
-        return f"{TAG_MOT}:{_fmt(l)},{_fmt(r)}{config.LINE_END}".encode(config.ENCODING)
+        return f"{TAG_MOT}:{_fmt(left_val)},{_fmt(r)}{config.LINE_END}".encode(config.ENCODING)
 
     @staticmethod
     def encode_set(name: str, value: float, scale: int | None = None) -> bytes:
@@ -254,6 +255,7 @@ class Protocol:
 # 二进制四轮速度帧(方案 B,11 字节)
 # ===========================================================================
 
+
 def crc8(data: bytes, poly: int = 0x07, init: int = 0x00) -> int:
     """CRC-8/ATM(多项式 0x07)。用于帧完整性校验。
 
@@ -277,16 +279,15 @@ class WheelFrame:
     轮序(w0~w3,俯视车头朝上逆时针):右前 → 左前 → 左后 → 右后。
     """
 
-    seq: int                       # 序号(0~255)
+    seq: int  # 序号(0~255)
     raw: tuple[int, int, int, int]  # 四轮原始定点整数
     speeds: tuple[float, float, float, float]  # 换算后的物理量
-    unit: str = ""                 # 单位标识(便于显示)
+    unit: str = ""  # 单位标识(便于显示)
 
     def labeled(self) -> list[tuple[str, float]]:
         """带轮位名称的结果:[('右前', 120.0), ('左前', ...), ...]。"""
         names = config.WHEEL_NAMES
-        return [(names[i] if i < len(names) else f"w{i}", v)
-                for i, v in enumerate(self.speeds)]
+        return [(names[i] if i < len(names) else f"w{i}", v) for i, v in enumerate(self.speeds)]
 
 
 def encode_wheel_frame(
@@ -304,10 +305,7 @@ def encode_wheel_frame(
     """
     if len(speeds) != WHEEL_COUNT:
         raise ValueError(f"需要 {WHEEL_COUNT} 个轮速,实际 {len(speeds)}")
-    raw = [
-        max(-32768, min(32767, int(round(float(s) * config.WHEEL_SPEED_SCALE))))
-        for s in speeds
-    ]
+    raw = [max(-32768, min(32767, int(round(float(s) * config.WHEEL_SPEED_SCALE)))) for s in speeds]
     body = bytes([FRAME_HEAD, seq & 0xFF]) + struct.pack(_WHEEL_FMT, *raw)
     return body + bytes([crc8(body)])
 
@@ -322,8 +320,8 @@ def decode_wheel_frame(frame: bytes) -> WheelFrame | None:
     speeds = tuple(v / config.WHEEL_SPEED_SCALE for v in raw)
     return WheelFrame(
         seq=frame[1],
-        raw=raw,                       # type: ignore[arg-type]
-        speeds=speeds,                 # type: ignore[arg-type]
+        raw=raw,  # type: ignore[arg-type]
+        speeds=speeds,  # type: ignore[arg-type]
         unit=config.WHEEL_SPEED_UNIT,
     )
 
@@ -332,10 +330,10 @@ def decode_wheel_frame(frame: bytes) -> WheelFrame | None:
 class LinkStats:
     """接收链路统计(丢帧/校验错误),供界面显示链路健康度。"""
 
-    frames_ok: int = 0        # 成功解码帧数
-    crc_errors: int = 0       # 校验失败次数
-    frames_lost: int = 0      # 由 seq 推断的丢帧数
-    garbage_bytes: int = 0    # 无法归类的字节数
+    frames_ok: int = 0  # 成功解码帧数
+    crc_errors: int = 0  # 校验失败次数
+    frames_lost: int = 0  # 由 seq 推断的丢帧数
+    garbage_bytes: int = 0  # 无法归类的字节数
     _last_seq: int | None = None
 
     def note_ok(self, seq: int) -> int:
@@ -375,7 +373,7 @@ class WheelFrameParser:
     """
 
     def __init__(self, on_frame=None, on_stats=None) -> None:
-        from typing import Callable
+        from collections.abc import Callable
 
         self.on_frame: Callable[[WheelFrame], None] | None = on_frame
         self.on_stats: Callable[[LinkStats], None] | None = on_stats
@@ -414,7 +412,7 @@ class WheelFrameParser:
             # 4) 成功
             del self._buf[:FRAME_LEN]
             lost = self.stats.note_ok(frame.seq)
-            if loss := lost:
+            if lost:
                 self._maybe_report(force=True)
             if self.on_frame:
                 self.on_frame(frame)
@@ -451,7 +449,7 @@ class StreamDemux:
     _HEAD = bytes([FRAME_HEAD])
 
     def __init__(self, on_frame=None, on_stats=None, on_text=None) -> None:
-        from typing import Callable
+        from collections.abc import Callable
 
         self.on_frame: Callable[[WheelFrame], None] | None = on_frame
         self.on_stats: Callable[[LinkStats], None] | None = on_stats

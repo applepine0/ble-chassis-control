@@ -2,8 +2,10 @@
 1) 解析广播包 —— 若模块在 ADV 里广播 Service UUID,不连接就能确认协议。
 2) 带重试的连接尝试(最多 3 次 x 40s),应对 Windows 偶发首连挂起。
 """
+
 import asyncio
 import traceback
+
 from bleak import BleakClient, BleakScanner
 
 ADDRESS = "7B:B7:05:04:23:A2"
@@ -32,7 +34,11 @@ async def probe_adv() -> None:
             print(f"    platform[{k!r}]: {v!r}")
     # winrt 事件参数里有真正的地址类型
     pd = adv.platform_data
-    raw = pd if (hasattr(pd, "adv") or hasattr(pd, "scan")) else (pd[1] if isinstance(pd, tuple) else None)
+    raw = (
+        pd
+        if (hasattr(pd, "adv") or hasattr(pd, "scan"))
+        else (pd[1] if isinstance(pd, tuple) else None)
+    )
     ea = getattr(raw, "adv", None) or getattr(raw, "scan", None)
     if ea is not None:
         try:

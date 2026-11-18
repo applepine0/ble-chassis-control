@@ -9,14 +9,13 @@ HC-05 是**经典蓝牙(BR/EDR)**,不是 BLE —— Windows 配对后会创建�
   * 写:asyncio.to_thread 包装阻塞写(HC-05 写入很快,不构成瓶颈);
   * 与 BLE 后端接口完全一致,前端无需区分。
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import re
 import threading
-import time
-from typing import Optional
 
 from . import config
 from .link import ChassisLink, LinkError, OnLineCallback, OnStateCallback
@@ -107,17 +106,15 @@ class SerialBackend(ChassisLink):
         on_wheel=None,
         on_stats=None,
     ) -> None:
-        super().__init__(
-            on_line=on_line, on_state=on_state, on_wheel=on_wheel, on_stats=on_stats
-        )
+        super().__init__(on_line=on_line, on_state=on_state, on_wheel=on_wheel, on_stats=on_stats)
         self.port = port or config.SERIAL_PORT
         self.baudrate = int(baudrate or config.SERIAL_BAUDRATE)
-        self._ser: Optional["serial.Serial"] = None
-        self._reader: Optional[threading.Thread] = None
+        self._ser: serial.Serial | None = None
+        self._reader: threading.Thread | None = None
         self._stop_evt = threading.Event()
-        self._reconnect_task: Optional[asyncio.Task] = None
+        self._reconnect_task: asyncio.Task | None = None
         self._manual_disconnect = False
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     # ------------------------------------------------------------------
     # 状态
@@ -135,9 +132,7 @@ class SerialBackend(ChassisLink):
     # ------------------------------------------------------------------
     async def connect(self) -> bool:
         if serial is None:
-            raise LinkError(
-                "未安装 pyserial —— 请运行:uv add pyserial"
-            )
+            raise LinkError("未安装 pyserial —— 请运行:uv add pyserial")
         self._manual_disconnect = False
 
         # 自动选口:未指定时优先蓝牙 SPP 口 / 唯一串口
@@ -150,15 +145,12 @@ class SerialBackend(ChassisLink):
                 ports = available_ports()
                 if ports:
                     names = ", ".join(f"{d}({s})" for d, s in ports)
-                    raise LinkError(
-                        f"检测到多个串口,请在配置或界面中指定:{names}"
-                    )
+                    raise LinkError(f"检测到多个串口,请在配置或界面中指定:{names}")
                 raise LinkError(
                     "未检测到任何串口:① USB-TTL 是否插好? "
                     "② HC-05 是否已在 Windows 蓝牙中配对(配对后才会出现 COM 口)?"
                 )
 
-        last: Exception | None = None
         self._loop = asyncio.get_running_loop()
         for attempt in range(1, config.CONNECT_MAX_ATTEMPTS + 1):
             self._emit(f"打开串口第 {attempt}/{config.CONNECT_MAX_ATTEMPTS} 次 ...")
@@ -190,7 +182,6 @@ class SerialBackend(ChassisLink):
                 self.last_error = ""
                 return True
             except Exception as exc:  # serial.SerialException 等
-                last = exc
                 self.last_error = self._friendly(exc)
                 self._emit(f"  失败:{self.last_error}")
                 self._ser = None
@@ -225,8 +216,7 @@ class SerialBackend(ChassisLink):
             except Exception:
                 pass
             raise LinkError(
-                "串口已打开但写入探测失败:"
-                f"{self._friendly_write(exc, config.SERIAL_PROBE_TIMEOUT)}"
+                f"串口已打开但写入探测失败:{self._friendly_write(exc, config.SERIAL_PROBE_TIMEOUT)}"
             ) from exc
 
     # ------------------------------------------------------------------
@@ -365,10 +355,7 @@ class SerialBackend(ChassisLink):
         name = type(exc).__name__
         up = msg.upper()
         if "ACCESS IS DENIED" in up or "PERMISSION" in up:
-            return (
-                f"串口被占用({msg}):请关闭其他串口程序"
-                "(VOFA+ / 串口助手 / Arduino IDE)后重试"
-            )
+            return f"串口被占用({msg}):请关闭其他串口程序(VOFA+ / 串口助手 / Arduino IDE)后重试"
         if "FILE NOT FOUND" in up or "COULD NOT OPEN PORT" in up:
             return (
                 f"串口不存在({msg}):① HC-05 是否已在 Windows 蓝牙中配对?"

@@ -2,6 +2,7 @@
 
 不依赖 frontend / backend;layout 与 chart 只消费这里的 ``Palette``。
 """
+
 from __future__ import annotations
 
 import ctypes
@@ -112,9 +113,7 @@ def _pick_family(root: Any, candidates: tuple[str, ...]) -> str | None:
 
 
 def _configure_fonts(root: Any) -> None:
-    family = _pick_family(
-        root, ("Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI")
-    )
+    family = _pick_family(root, ("Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI"))
     for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont"):
         try:
             f = font.nametofont(name)

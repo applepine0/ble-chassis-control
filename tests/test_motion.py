@@ -3,8 +3,8 @@
 不接触硬件;验证"旋转前进"的核心行为:
     θ(t) = θ₀ + ∫ω·dt,按 rate_hz 持续下发,停止时自动发 STOP。
 """
+
 import asyncio
-import math
 import os
 import sys
 import time
@@ -21,9 +21,11 @@ class FakeLink:
 
     def __init__(self) -> None:
         self.frames: list[tuple[float, float, float]] = []
+        self.times: list[float] = []
         self.stops = 0
 
     async def send_vel(self, v: float, deg: float, omega: float) -> None:
+        self.times.append(time.monotonic())
         self.frames.append((v, deg, omega))
 
     async def send_stop(self) -> None:
@@ -35,7 +37,7 @@ def test_normalize() -> None:
     assert normalize_deg(90) == 90
     assert normalize_deg(370) == 10
     assert normalize_deg(-190) == 170
-    assert normalize_deg(180) == -180      # 约定 [-180, 180)
+    assert normalize_deg(180) == -180  # 约定 [-180, 180)
     assert normalize_deg(540) == -180
     print("1) 角度归一化 [-180,180): OK")
 
@@ -61,14 +63,13 @@ def test_theta_accumulates_negative_default() -> None:
         assert 15 <= n <= 25, f"1 秒 @20Hz 应约 20 帧,实际 {n}"
         thetas = [f[1] for f in link.frames]
         # θ_body 单调递减(负向累积)
-        assert all(b <= a for a, b in zip(thetas, thetas[1:])), thetas
+        assert all(b <= a for a, b in zip(thetas, thetas[1:], strict=False)), thetas
         # 期末 ≈ -90°
         assert -95.0 <= thetas[-1] <= -80.0, f"θ 期末={thetas[-1]} 期望≈-90"
         # v/ω 原样透传
         assert all(abs(f[0] - 0.5) < 1e-9 for f in link.frames)
         assert all(abs(f[2] - 1.5708) < 1e-9 for f in link.frames)
-        print(f"2) 默认 SIGN=-1,θ 反向累积: {thetas[0]:.1f}° → {thetas[-1]:.1f}°"
-              f"({n} 帧/秒): OK")
+        print(f"2) 默认 SIGN=-1,θ 反向累积: {thetas[0]:.1f}° → {thetas[-1]:.1f}°({n} 帧/秒): OK")
 
     asyncio.run(run())
 
@@ -87,11 +88,12 @@ def test_world_direction_constant() -> None:
         runner.stop()
         await task
 
-        # 逐帧重建世界系方向:world_i = θ_body_i + ω·t_i
+        # 逐帧重建世界系方向:world_i = θ_body_i + ω·(t_i − t_0)
+        # 注意:不能用 i/rate 的理想时间,Windows 定时器实际频率低于设定值。
         worst = 0.0
-        for i, (_v, th, _w) in enumerate(link.frames):
-            t = i / rate
-            world = th + omega * t * 57.29577951308232
+        t0 = link.times[0]
+        for (_v, th, _w), t in zip(link.frames, link.times, strict=False):
+            world = th + omega * (t - t0) * 57.29577951308232
             err = abs(((world - theta0 + 180) % 360) - 180)
             worst = max(worst, err)
         assert worst < 1.5, f"世界系方向最大偏差 {worst:.2f}° 应≈0"
@@ -105,8 +107,7 @@ def test_sign_switch_flips_direction() -> None:
 
     async def run() -> None:
         link = FakeLink()
-        runner = MotionRunner(link, v=0.5, theta0=0.0, omega=1.5708,
-                              rate_hz=20, sign=+1.0)
+        runner = MotionRunner(link, v=0.5, theta0=0.0, omega=1.5708, rate_hz=20, sign=+1.0)
         task = asyncio.create_task(runner.run())
         await asyncio.sleep(0.5)
         runner.stop()
@@ -151,7 +152,7 @@ def test_negative_omega_and_wrap() -> None:
     async def run() -> None:
         link = FakeLink()
         theta0 = 170.0
-        omega = -1.5708          # rad/s
+        omega = -1.5708  # rad/s
         rate = 20.0
         runner = MotionRunner(link, v=0.5, theta0=theta0, omega=omega, rate_hz=rate)
         task = asyncio.create_task(runner.run())
@@ -165,8 +166,10 @@ def test_negative_omega_and_wrap() -> None:
         assert -155.0 <= thetas[-1] <= -135.0, f"期末={thetas[-1]} 期望≈-145(即215°)"
         # 全部落在合法区间
         assert all(-180.0 <= t < 180.0 for t in thetas), thetas
-        print(f"7) ω<0(SIGN=-1)θ 递增并跨 ±180 归一化: "
-              f"{thetas[0]:.1f}° → {thetas[-1]:.1f}°(等价 215°): OK")
+        print(
+            f"7) ω<0(SIGN=-1)θ 递增并跨 ±180 归一化: "
+            f"{thetas[0]:.1f}° → {thetas[-1]:.1f}°(等价 215°): OK"
+        )
 
     asyncio.run(run())
 

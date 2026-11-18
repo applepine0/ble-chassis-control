@@ -7,6 +7,7 @@
   D. address_type="public"                (对照组)
   E. 默认参数 + pair=True                 (配对尝试)
 """
+
 import asyncio
 import traceback
 
@@ -17,9 +18,7 @@ PER_ATTEMPT_TIMEOUT = 25.0
 CONFIGS = {
     "A: use_cached_services=False": dict(winrt={"use_cached_services": False}),
     "B: address_type=random": dict(winrt={"address_type": "random"}),
-    "C: uncached+random": dict(
-        winrt={"use_cached_services": False, "address_type": "random"}
-    ),
+    "C: uncached+random": dict(winrt={"use_cached_services": False, "address_type": "random"}),
     "D: address_type=public": dict(winrt={"address_type": "public"}),
     "E: pair=True 默认缓存": dict(pair=True),
 }

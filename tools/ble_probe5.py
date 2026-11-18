@@ -1,6 +1,8 @@
 """探针 5: 最后两个旁路尝试 —— ① 读 Windows 已有 GATT 缓存(免射频交互)② 单次 90s 超长等待。"""
+
 import asyncio
 import traceback
+
 from bleak import BleakClient, BleakScanner
 
 ADDRESS = "7B:B7:05:04:23:A2"
@@ -35,9 +37,13 @@ async def try_once(label: str, timeout: float, winrt: dict) -> None:
 
 
 async def main() -> None:
-    await try_once("I: 读缓存(CACHED)", 30.0, {"use_cached_services": True, "address_type": "public"})
+    await try_once(
+        "I: 读缓存(CACHED)", 30.0, {"use_cached_services": True, "address_type": "public"}
+    )
     await asyncio.sleep(2)
-    await try_once("J: 超长等待 90s", 90.0, {"use_cached_services": False, "address_type": "public"})
+    await try_once(
+        "J: 超长等待 90s", 90.0, {"use_cached_services": False, "address_type": "public"}
+    )
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@
   * 界面提交异步任务用 ``asyncio.run_coroutine_threadsafe``;
   * 后端回调(接收/状态)经 ``queue.Queue`` 传回 GUI 线程,由 ``after`` 轮询。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -16,15 +17,21 @@ import threading
 import time
 import tkinter as tk
 from collections import deque
-from tkinter import messagebox
+from tkinter import messagebox, ttk
+from typing import TYPE_CHECKING
 
 from . import config
 from .backend import BLEBackend, BLEError
 from .backend_serial import SerialBackend, available_ports
-from .link import ChassisLink, LinkError
+from .link import ChassisLink
 from .motion import MotionRunner
 from .protocol import ParsedMessage, Protocol
-from .ui.theme import apply_theme, enable_dpi_awareness
+from .ui.theme import Palette, apply_theme, enable_dpi_awareness
+
+if TYPE_CHECKING:
+    from .chart import WheelChart
+    from .protocol import LinkStats
+    from .ui.chart_window import ChartWindow
 
 MAX_LOG_LINES = 5000
 
@@ -34,6 +41,50 @@ def now() -> str:
 
 
 class App(tk.Tk):
+    # 以下控件由 ui/layout.py 构建并注入,显式声明供 Pylance 使用
+    palette: Palette
+    link_kind: tk.StringVar
+    target_label: ttk.Label
+    addr_var: tk.StringVar
+    baud_var: tk.StringVar
+    baud_box: ttk.Combobox
+    refresh_btn: ttk.Button
+    btn_conn: ttk.Button
+    btn_disc: ttk.Button
+    status_var: tk.StringVar
+    status_label: ttk.Label
+    port_hint: tk.StringVar
+
+    speed_var: tk.DoubleVar
+    deg_var: tk.DoubleVar
+    omega_var: tk.DoubleVar
+    btn_mot: ttk.Button
+    btn_stop: tk.Button
+
+    rate_var: tk.DoubleVar
+    motion_state: tk.StringVar
+    btn_motion_start: ttk.Button
+    btn_motion_stop: ttk.Button
+
+    set_name: ttk.Combobox
+    set_val: ttk.Entry
+    set_hint_var: tk.StringVar
+    btn_set: ttk.Button
+    raw_var: tk.StringVar
+    btn_raw: ttk.Button
+
+    log: tk.Text
+    autoscroll_var: tk.BooleanVar
+    chart: WheelChart
+
+    wheel_var: tk.StringVar
+    link_health_var: tk.StringVar
+    info_var: tk.StringVar
+
+    chart_window: ChartWindow | None
+    _last_stats: LinkStats | None
+    _single_send_hint_shown: bool
+
     def __init__(self) -> None:
         enable_dpi_awareness()
         super().__init__()
@@ -51,16 +102,16 @@ class App(tk.Tk):
 
         # 当前链路(默认串口;由界面单选切换)
         self.backend: ChassisLink = self._make_link(config.LINK_KIND)
-        self.motion: "MotionRunner | None" = None   # 定频运动下发器
-        self.rx_queue: "queue.Queue[tuple]" = queue.Queue()
+        self.motion: MotionRunner | None = None  # 定频运动下发器
+        self.rx_queue: queue.Queue[tuple] = queue.Queue()
 
         # 界面状态
-        self._reconnecting = False          # 是否处于自动重连流程
+        self._reconnecting = False  # 是否处于自动重连流程
         self._last_serial_port = config.SERIAL_PORT
         self._frame_times: deque[float] = deque(maxlen=100)
         self._wheel_hz = 0.0
         self._last_stats = None
-        self.chart_window = None            # 独立放大曲线窗口
+        self.chart_window = None  # 独立放大曲线窗口
 
         self._build_ui()
         self.bind("<Escape>", self._on_escape)
@@ -235,9 +286,7 @@ class App(tk.Tk):
         current = self.addr_var.get().strip()
         if current in stale_bt and len(live_bt) == 1:
             self.addr_var.set(live_bt[0])
-            self.port_hint.set(
-                f"可用串口:{listing} | 已将旧口 {current} 切换为 {live_bt[0]}"
-            )
+            self.port_hint.set(f"可用串口:{listing} | 已将旧口 {current} 切换为 {live_bt[0]}")
         elif not current:
             if len(live_bt) == 1:
                 self.addr_var.set(live_bt[0])
@@ -272,14 +321,14 @@ class App(tk.Tk):
     def on_connect(self) -> None:
         # 防护:已连接 / 连接中时忽略重复点击,避免二次打开串口自锁
         if self.backend.is_connected:
-            self.log_sys("已连接,忽略重复的\"连接\"点击")
+            self.log_sys('已连接,忽略重复的"连接"点击')
             return
         self._reconnecting = False
         value = self.addr_var.get().strip()
         if self.link_kind.get() == "ble":
-            self.backend.address = value.upper()   # type: ignore[attr-defined]
+            self.backend.address = value.upper()  # type: ignore[attr-defined]
         else:
-            self.backend.port = value             # type: ignore[attr-defined]
+            self.backend.port = value  # type: ignore[attr-defined]
             self._last_serial_port = value
             try:
                 self.backend.baudrate = int(self.baud_var.get())  # type: ignore[attr-defined]
@@ -322,7 +371,7 @@ class App(tk.Tk):
         """先等运动协程退出(其内部会发 STOP),再关闭链路。"""
         motion = self.motion
         if motion is not None:
-            for _ in range(30):                 # 最多等 3 秒
+            for _ in range(30):  # 最多等 3 秒
                 if not motion.is_running:
                     break
                 await asyncio.sleep(0.1)
@@ -345,7 +394,7 @@ class App(tk.Tk):
         """切换链路时:等旧链路上的运动协程发出 STOP,再断开旧链路。"""
         motion = self.motion
         if motion is not None:
-            for _ in range(30):                 # 最多等 3 秒
+            for _ in range(30):  # 最多等 3 秒
                 if not motion.is_running:
                     break
                 await asyncio.sleep(0.1)
@@ -381,9 +430,7 @@ class App(tk.Tk):
             if addr.upper() == target or name == "JDY-23":
                 hits += 1
                 uuids = ", ".join(adv.service_uuids) or "(无服务广播)"
-                self.log_sys(
-                    f"发现 {addr}  name={dev.name!r} RSSI={adv.rssi} service=[{uuids}]"
-                )
+                self.log_sys(f"发现 {addr}  name={dev.name!r} RSSI={adv.rssi} service=[{uuids}]")
         if hits == 0:
             self._set_status("未发现目标模块", self.palette.err)
             self.log_err(
@@ -455,7 +502,10 @@ class App(tk.Tk):
 
         self.motion = MotionRunner(
             self.backend,
-            v=v, theta0=theta0, omega=omega, rate_hz=rate,
+            v=v,
+            theta0=theta0,
+            omega=omega,
+            rate_hz=rate,
             on_tick=self._on_motion_tick,
             stop_on_error=config.MOTION_STOP_ON_ERROR,
         )
@@ -463,8 +513,7 @@ class App(tk.Tk):
         self.btn_motion_stop.configure(state="normal")
         self.motion_state.set(f"运行中 @{rate:g}Hz")
         self.log_sys(
-            f"启动运动:v={v:g} m/s, θ₀={theta0:g}°, ω={omega:g} rad/s, "
-            f"{rate:g}Hz(θ 将按 ω 累积)"
+            f"启动运动:v={v:g} m/s, θ₀={theta0:g}°, ω={omega:g} rad/s, {rate:g}Hz(θ 将按 ω 累积)"
         )
         self._submit(
             self.motion.run(),
@@ -695,9 +744,7 @@ class App(tk.Tk):
         except Exception:
             pass
         try:
-            fut = asyncio.run_coroutine_threadsafe(
-                self._shutdown_sequence(), self.loop
-            )
+            fut = asyncio.run_coroutine_threadsafe(self._shutdown_sequence(), self.loop)
             fut.result(timeout=3)
         except Exception:
             pass
@@ -713,7 +760,7 @@ class App(tk.Tk):
     async def _shutdown_sequence(self) -> None:
         """关闭前:等运动协程收尾(其内部会发 STOP),再断开链路。"""
         if self.motion is not None and self.motion.is_running:
-            for _ in range(20):                 # 最多等 2 秒让 run() 退出并发 STOP
+            for _ in range(20):  # 最多等 2 秒让 run() 退出并发 STOP
                 if not self.motion.is_running:
                     break
                 await asyncio.sleep(0.1)

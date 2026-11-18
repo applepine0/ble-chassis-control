@@ -2,11 +2,11 @@
 
 不接触真实串口;验证此前修复的“读线程无法调度自动重连”bug 是否解决。
 """
+
 import asyncio
 import os
 import sys
 import threading
-import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 
@@ -80,7 +80,7 @@ class OfflineSerial(FakeSerial):
 
 
 def main() -> None:
-    bs.serial = FakeSerialModule          # 替换真实 pyserial
+    bs.serial = FakeSerialModule  # 替换真实 pyserial
     bs.list_ports = type("LP", (), {"comports": staticmethod(lambda: [])})()
     # 既有场景用假串口直接连,不启用 STOP 探测;探测场景单独测
     bs.config.SERIAL_PROBE_ON_CONNECT = False
@@ -101,16 +101,16 @@ def main() -> None:
         assert link.is_connected
 
         # 1) 组帧:注入 "MOT:1,2\nTEL:BAT:7.4\n" 应产出两行
-        link._ser.inject(b"MOT:1,2\nTEL:BAT:7.4\n")   # type: ignore[union-attr]
+        link._ser.inject(b"MOT:1,2\nTEL:BAT:7.4\n")  # type: ignore[union-attr]
         await asyncio.sleep(0.3)
         assert lines == ["MOT:1,2", "TEL:BAT:7.4"], lines
         print("1) 读线程 + 组帧(跨行/多行): OK")
 
         # 2) 半包 -> 补全后出整行
-        link._ser.inject(b"STO")                       # type: ignore[union-attr]
+        link._ser.inject(b"STO")  # type: ignore[union-attr]
         await asyncio.sleep(0.1)
         assert lines == ["MOT:1,2", "TEL:BAT:7.4"], "半包不应出整行"
-        link._ser.inject(b"P\n")                       # type: ignore[union-attr]
+        link._ser.inject(b"P\n")  # type: ignore[union-attr]
         await asyncio.sleep(0.2)
         assert lines[-1] == "STOP", lines
         print("2) 半包拼接: OK")
@@ -119,8 +119,7 @@ def main() -> None:
         await link.send_vel(0.5, 90, 0)
         assert link._ser.written == b"VEL:500,900,0\n", link._ser.written  # type: ignore[union-attr]
         await link.send_mot(10, -20)
-        assert link._ser.written == b"VEL:500,900,0\nMOT:10,-20\n", \
-            link._ser.written  # type: ignore[union-attr]
+        assert link._ser.written == b"VEL:500,900,0\nMOT:10,-20\n", link._ser.written  # type: ignore[union-attr]
         print("3) 发送(VEL/MOT 编码 + flush): OK")
 
         # 4) 自动重连:掉线后应真的重新打开串口(而不仅是打印状态)
@@ -134,7 +133,7 @@ def main() -> None:
         def boom_read(n=1):  # noqa: ANN001
             raise Boom("线掉了")
 
-        link._ser.read = boom_read                        # type: ignore[union-attr]
+        link._ser.read = boom_read  # type: ignore[union-attr]
         await asyncio.sleep(0.3)
         joined = " | ".join(states[before:])
         assert "连接中断" in joined, states[before:]
@@ -158,17 +157,17 @@ def main() -> None:
 
     async def send_only_scenario() -> None:
         """只下发模式:不注册 on_line,下发不受影响;收到数据静默丢弃不报错。"""
-        link = bs.SerialBackend("COM99", 9600)      # 注意:无 on_line / on_state
+        link = bs.SerialBackend("COM99", 9600)  # 注意:无 on_line / on_state
         assert link._on_line is None and link._on_state is None
         await link.connect()
         assert link.is_connected
         await link.send_vel(0.5, 90, 0)
         await link.send_vel(0, 0, 1.57)
         await link.send_stop()
-        written = link._ser.written                  # type: ignore[union-attr]
+        written = link._ser.written  # type: ignore[union-attr]
         assert written == b"VEL:500,900,0\nVEL:0,0,1570\nSTOP\n", written
         # 注入回传数据:应被静默丢弃,不抛异常
-        link._ser.inject(b"TEL:BAT:7.4\njunk\n")     # type: ignore[union-attr]
+        link._ser.inject(b"TEL:BAT:7.4\njunk\n")  # type: ignore[union-attr]
         await asyncio.sleep(0.3)
         await link.disconnect()
         assert not link.is_connected

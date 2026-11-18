@@ -2,10 +2,11 @@
 
 只负责"大图"视图:数据由 App 推送,配色由 theme.Palette 注入。
 """
+
 from __future__ import annotations
 
 import tkinter as tk
-from typing import Callable
+from collections.abc import Callable
 
 from .. import config
 from ..chart import WheelChart
@@ -68,9 +69,7 @@ class ChartWindow(tk.Toplevel):
             return
         try:
             self.chart.maybe_redraw()
-            self._after_id = self.after(
-                max(16, int(self.chart.redraw_ms)), self._tick
-            )
+            self._after_id = self.after(max(16, int(self.chart.redraw_ms)), self._tick)
         except tk.TclError:
             self._closed = True
 

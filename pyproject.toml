@@ -16,6 +16,27 @@ dependencies = [
 [project.scripts]
 ble-chassis-control = "ble_chassis_control:main"
 
+[dependency-groups]
+dev = [
+    "ruff==0.17.5",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src", "tests", "tools"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+# 历史代码里有少量长行,先不阻断;格式化交给 ruff format 逐步处理
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ble_chassis_control"]
+
+[tool.ruff.format]
+quote-style = "double"
+
 [build-system]
 requires = ["uv_build>=0.12.23,<0.13.0"]
 build-backend = "uv_build"

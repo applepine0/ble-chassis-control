@@ -8,6 +8,7 @@
 注:写入"成功"指 Windows 协议栈已接收;吞吐以写入计(HC-06 未接 MCU
 时数据到 UART 即丢弃,不影响串口侧可吸收速率评估)。
 """
+
 import os
 import sys
 import time
@@ -22,7 +23,9 @@ PORT = sys.argv[1] if len(sys.argv) > 1 else "COM15"
 BAUD = int(sys.argv[2]) if len(sys.argv) > 2 else 9600
 
 
-async def phase(link: SerialBackend, label: str, duration: float, payload: bytes, interval: float) -> None:
+async def phase(
+    link: SerialBackend, label: str, duration: float, payload: bytes, interval: float
+) -> None:
     ok = fail = 0
     t0 = time.perf_counter()
     end = t0 + duration
@@ -38,7 +41,7 @@ async def phase(link: SerialBackend, label: str, duration: float, payload: bytes
     dt = time.perf_counter() - t0
     print(
         f"  {label:<22} 成功={ok:>5} 失败={fail:>4} "
-        f"速率={ok/dt:7.1f} 条/s  吞吐={sent/dt/1024:6.2f} KB/s"
+        f"速率={ok / dt:7.1f} 条/s  吞吐={sent / dt / 1024:6.2f} KB/s"
     )
 
 
@@ -52,8 +55,8 @@ async def main() -> None:
         return
     print(f"==> 已连接: {link.target}\n")
 
-    mot = b"MOT:25,-25\n"          # 12 字节典型指令
-    big = b"X" * 200 + b"\n"       # 200 字节大包
+    mot = b"MOT:25,-25\n"  # 12 字节典型指令
+    big = b"X" * 200 + b"\n"  # 200 字节大包
 
     try:
         await phase(link, "A 低频 20Hz(15s)", 15.0, mot, 0.050)
@@ -73,7 +76,7 @@ async def main() -> None:
     print(f"  {'无掉线 ✓' if drops == 0 else f'检测到 {drops} 次 is_connected=False'}")
 
     await link.disconnect()
-    print(f"\n==> 基准完成(断开链路)")
+    print("\n==> 基准完成(断开链路)")
 
 
 if __name__ == "__main__":

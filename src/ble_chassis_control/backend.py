@@ -10,16 +10,16 @@
 ⚠️ 实测结论:JDY-23(V81-02 固件)与 Windows 的配对/安全层不兼容,无法完成
 GATT 服务枚举。若使用该模块请改用 SerialBackend(HC-05 经典蓝牙串口)。
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Callable, Optional
 
 from bleak import BleakClient, BleakGATTCharacteristic, BleakScanner
 
 from . import config
-from .link import BLEError, ChassisLink, LinkError, OnLineCallback, OnStateCallback
+from .link import BLEError, ChassisLink, OnLineCallback, OnStateCallback
 
 logger = logging.getLogger(__name__)
 
@@ -38,18 +38,16 @@ class BLEBackend(ChassisLink):
         on_wheel=None,
         on_stats=None,
     ) -> None:
-        super().__init__(
-            on_line=on_line, on_state=on_state, on_wheel=on_wheel, on_stats=on_stats
-        )
+        super().__init__(on_line=on_line, on_state=on_state, on_wheel=on_wheel, on_stats=on_stats)
         self.address = (address or config.DEVICE_ADDRESS).upper()
-        self._client: Optional[BleakClient] = None
-        self._write_char: Optional[BleakGATTCharacteristic] = None
-        self._notify_char: Optional[BleakGATTCharacteristic] = None
+        self._client: BleakClient | None = None
+        self._write_char: BleakGATTCharacteristic | None = None
+        self._notify_char: BleakGATTCharacteristic | None = None
         # 公开只读信息
-        self.write_uuid: Optional[str] = None
-        self.notify_uuid: Optional[str] = None
+        self.write_uuid: str | None = None
+        self.notify_uuid: str | None = None
         self.services_text: str = ""
-        self._reconnect_task: Optional[asyncio.Task] = None
+        self._reconnect_task: asyncio.Task | None = None
         self._manual_disconnect = False
 
     # ------------------------------------------------------------------
@@ -77,7 +75,6 @@ class BLEBackend(ChassisLink):
     async def connect(self) -> bool:
         """带重试的连接。成功返回 True,全部失败抛 BLEError。"""
         self._manual_disconnect = False
-        last: Exception | None = None
         for attempt in range(1, config.CONNECT_MAX_ATTEMPTS + 1):
             self._emit(f"连接第 {attempt}/{config.CONNECT_MAX_ATTEMPTS} 次 ...")
             try:
@@ -85,7 +82,6 @@ class BLEBackend(ChassisLink):
                 self.last_error = ""
                 return True
             except Exception as exc:
-                last = exc
                 self.last_error = self._friendly(exc, connect=True)
                 self._emit(f"  失败:{self.last_error}")
                 await self._close_client()
@@ -129,9 +125,7 @@ class BLEBackend(ChassisLink):
         else:
             self._emit("警告:未找到 notify 特征,只能下发、无法接收回传")
 
-        self._emit(
-            f"连接成功 MTU={self.mtu} 写={self.write_uuid} 通知={self.notify_uuid}"
-        )
+        self._emit(f"连接成功 MTU={self.mtu} 写={self.write_uuid} 通知={self.notify_uuid}")
 
     def _resolve_characteristics(self, client: BleakClient) -> None:
         """按优先级解析收发特征:已知 UUID 精确匹配 -> 启发式查找。"""
@@ -165,19 +159,17 @@ class BLEBackend(ChassisLink):
             for svc in services:
                 for ch in svc.characteristics:
                     props = set(ch.properties)
-                    if write_ch is None and (
-                        "write" in props or "write-without-response" in props
-                    ):
+                    if write_ch is None and ("write" in props or "write-without-response" in props):
                         write_ch = ch
-                    if notify_ch is None and (
-                        "notify" in props or "indicate" in props
-                    ):
+                    if notify_ch is None and ("notify" in props or "indicate" in props):
                         notify_ch = ch
                 if write_ch and notify_ch:
                     break
             # 别名类模块(FFE1 同时承担读写)下,通知特征可能就是这个唯一特征
-            if notify_ch is None and write_ch is not None and (
-                "notify" in set(write_ch.properties)
+            if (
+                notify_ch is None
+                and write_ch is not None
+                and ("notify" in set(write_ch.properties))
             ):
                 notify_ch = write_ch
 
@@ -209,15 +201,11 @@ class BLEBackend(ChassisLink):
             raise BLEError("未连接")
         preferred = config.WRITE_WITH_RESPONSE
         if preferred is None:
-            preferred = "write-without-response" not in set(
-                self._write_char.properties
-            )
+            preferred = "write-without-response" not in set(self._write_char.properties)
         last: Exception | None = None
         for mode in (preferred, not preferred):
             try:
-                await self._client.write_gatt_char(
-                    self._write_char, data, response=mode
-                )
+                await self._client.write_gatt_char(self._write_char, data, response=mode)
                 self.last_error = ""
                 return
             except Exception as exc:

@@ -5,8 +5,10 @@
                       NON_CONNECTABLE_UNDIRECTED = 不可连接(休眠/异常态,常见于 AT+STARTEN 0)
   raw_advertisement_type / flags : 原始广播类型字节与标志
 """
+
 import asyncio
 import traceback
+
 from bleak import BleakScanner
 
 ADDRESS = "7B:B7:05:04:23:A2"
@@ -20,14 +22,18 @@ async def main() -> None:
         if dev.address.upper() != ADDRESS:
             return
         pd = adv.platform_data
-        raw = pd if (hasattr(pd, "scan") or hasattr(pd, "adv")) else (
-            pd[1] if isinstance(pd, tuple) else None
+        raw = (
+            pd
+            if (hasattr(pd, "scan") or hasattr(pd, "adv"))
+            else (pd[1] if isinstance(pd, tuple) else None)
         )
         ea = getattr(raw, "scan", None) or getattr(raw, "adv", None)
         info = {"rssi": adv.rssi, "name": dev.name, "uuids": list(adv.service_uuids)}
         attr_name = "advertisement_type"
         if not hasattr(ea, attr_name):
-            info["err"] = f"事件参数无 {attr_name} 属性;可用属性: {[a for a in dir(ea) if not a.startswith('_')][:20]}"
+            info["err"] = (
+                f"事件参数无 {attr_name} 属性;可用属性: {[a for a in dir(ea) if not a.startswith('_')][:20]}"
+            )
         else:
             adv_type = getattr(ea, attr_name)
             info["adv_type"] = adv_type.name if hasattr(adv_type, "name") else str(adv_type)
@@ -37,7 +43,9 @@ async def main() -> None:
                 return
             advobj = getattr(ea, "advertisement", None)
             flags = getattr(advobj, "flags", None) if advobj else None
-            info["flags"] = flags.name if flags is not None and hasattr(flags, "name") else str(flags)
+            info["flags"] = (
+                flags.name if flags is not None and hasattr(flags, "name") else str(flags)
+            )
         last.clear()
         last.update(info)
 
@@ -60,7 +68,7 @@ async def main() -> None:
         print(f"    (adv_type 未取得:{last.get('err')})")
     print(f"    services   = {last.get('uuids')}")
     if last.get("saw_scan_response"):
-        print(f"    (观测到扫描响应包:模块应答扫描请求,存活正常)")
+        print("    (观测到扫描响应包:模块应答扫描请求,存活正常)")
     connectable = "CONNECTABLE" in str(last.get("adv_type", "")).upper()
     print()
     if connectable:

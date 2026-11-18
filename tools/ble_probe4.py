@@ -1,6 +1,8 @@
 """探针 4: 定向拉取 GATT 服务(services=[FFE0]),绕过全量枚举挂起问题。"""
+
 import asyncio
 import traceback
+
 from bleak import BleakClient, BleakScanner
 
 ADDRESS = "7B:B7:05:04:23:A2"

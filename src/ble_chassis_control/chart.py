@@ -11,13 +11,14 @@
 * **冻结检测**:若一段时间无新数据(如断链),曲线保持最后状态,
   状态行提示"(无数据)"。
 """
+
 from __future__ import annotations
 
 import time
 import tkinter as tk
 from collections import deque
+from collections.abc import Callable
 from tkinter import ttk
-from typing import Callable
 
 # 四轮配色(与轮序 w0~w3 对应)
 WHEEL_COLORS = ("#D32F2F", "#1976D2", "#388E3C", "#F57C00")  # 右前 左前 左后 右后
@@ -45,8 +46,8 @@ class WheelChart(ttk.Frame):
         *,
         names: tuple[str, ...] = ("右前", "左前", "左后", "右后"),
         unit: str = "rpm",
-        maxlen: int = 600,          # 保留最近 N 个采样(600 @100Hz = 6 秒)
-        redraw_ms: int = 50,        # 重绘节流
+        maxlen: int = 600,  # 保留最近 N 个采样(600 @100Hz = 6 秒)
+        redraw_ms: int = 50,  # 重绘节流
         height: int = 150,
         colors: tuple[str, ...] | None = None,
         bg: str = C_BG,
@@ -67,9 +68,7 @@ class WheelChart(ttk.Frame):
         self._axis = axis
         self._text = text
 
-        self._series: list[deque[float]] = [
-            deque(maxlen=maxlen) for _ in names
-        ]
+        self._series: list[deque[float]] = [deque(maxlen=maxlen) for _ in names]
         self._last_push = 0.0
         self._dirty = False
         self._last_draw = 0.0
@@ -82,32 +81,28 @@ class WheelChart(ttk.Frame):
         # 顶部:图例 + 控制
         top = ttk.Frame(self)
         top.grid(row=0, column=0, sticky="ew", pady=(0, 2))
-        for i, (name, color) in enumerate(zip(names, self.colors)):
+        for i, (name, color) in enumerate(zip(names, self.colors, strict=False)):
             # 注意:ttk.Frame 不支持 cget("background")(styled widget),
             # 故图例色块用 tk.Label,背景由父容器继承(不显式设置)。
-            tk.Label(top, text="■", fg=color, font=("", 11)).grid(
-                row=0, column=i, padx=(0, 1)
-            )
+            tk.Label(top, text="■", fg=color, font=("", 11)).grid(row=0, column=i, padx=(0, 1))
             ttk.Label(top, text=name).grid(row=0, column=i + 10, padx=(0, 8))
         ttk.Checkbutton(
-            top, text="自动量程", variable=self._auto_scale,
+            top,
+            text="自动量程",
+            variable=self._auto_scale,
             command=self._on_toggle_scale,
         ).grid(row=0, column=30, padx=(6, 6))
         if on_expand is not None:
             ttk.Button(top, text="放大", width=6, command=on_expand).grid(
                 row=0, column=29, padx=(6, 0)
             )
-        ttk.Button(top, text="清空", width=6, command=self.clear).grid(
-            row=0, column=31
-        )
+        ttk.Button(top, text="清空", width=6, command=self.clear).grid(row=0, column=31)
         ttk.Label(top, textvariable=self._frozen_var, foreground=self._axis).grid(
             row=0, column=32, padx=(8, 0)
         )
 
         # 画布
-        self.canvas = tk.Canvas(
-            self, height=height, bg=self._bg, highlightthickness=0
-        )
+        self.canvas = tk.Canvas(self, height=height, bg=self._bg, highlightthickness=0)
         self.canvas.grid(row=1, column=0, sticky="nsew")
         self.canvas.bind("<Configure>", lambda _e: self._draw(force=True))
 
@@ -129,9 +124,9 @@ class WheelChart(ttk.Frame):
         self._frozen_var.set("(无数据)")
         self._draw(force=True)
 
-    def copy_data_from(self, other: "WheelChart") -> None:
+    def copy_data_from(self, other: WheelChart) -> None:
         """复制另一张曲线的数据(用于打开放大窗口时继承已有波形)。"""
-        for dst, src in zip(self._series, other._series):
+        for dst, src in zip(self._series, other._series, strict=False):
             dst.clear()
             dst.extend(src)
         self._last_push = other._last_push
@@ -161,7 +156,7 @@ class WheelChart(ttk.Frame):
         c = self.canvas
         w = c.winfo_width()
         h = c.winfo_height()
-        if w <= 1 or h <= 1:               # 尚未布局
+        if w <= 1 or h <= 1:  # 尚未布局
             return
         self._dirty = False
         self._last_draw = time.monotonic()
@@ -195,8 +190,9 @@ class WheelChart(ttk.Frame):
             y = h * k / 4
             v = hi - (hi - lo) * k / 4
             c.create_line(0, y, w, y, fill=self._grid)
-            c.create_text(4, y + 6, anchor="w", fill=self._text,
-                          text=f"{v:+.0f}", font=("Consolas", 7))
+            c.create_text(
+                4, y + 6, anchor="w", fill=self._text, text=f"{v:+.0f}", font=("Consolas", 7)
+            )
 
         # 零线加粗
         if lo <= 0 <= hi:
@@ -217,9 +213,7 @@ class WheelChart(ttk.Frame):
                     x = k * w / min(steps, n - 1) if min(steps, n - 1) else 0
                     pts.extend((x, to_y(dq[pos])))
             if len(pts) >= 4:
-                c.create_line(*pts, fill=self.colors[idx % len(self.colors)],
-                              width=1, smooth=False)
+                c.create_line(*pts, fill=self.colors[idx % len(self.colors)], width=1, smooth=False)
 
         # 单位标注
-        c.create_text(w - 4, 8, anchor="ne", fill=self._text, text=self.unit,
-                      font=("Consolas", 8))
+        c.create_text(w - 4, 8, anchor="ne", fill=self._text, text=self.unit, font=("Consolas", 8))

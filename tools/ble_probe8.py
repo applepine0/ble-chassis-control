@@ -4,6 +4,7 @@
 慢速串行重试(40s 超时+冷却)可能每次都错过唤醒窗口,密集连发则不同。
 成功即:输出服务树 → 写 FFE1(MOT:0,0)→ 订阅通知等 3s。
 """
+
 import os
 import sys
 
@@ -11,6 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 
 import asyncio
 import traceback
+
 from bleak import BleakClient, BleakScanner
 
 from ble_chassis_control import config
@@ -24,7 +26,7 @@ async def main() -> None:
     if device is None:
         print("!! 未扫描到模块")
         return
-    print(f"==> 快速连发 6 次 x 15s ...", flush=True)
+    print("==> 快速连发 6 次 x 15s ...", flush=True)
     for i in range(1, 7):
         client = BleakClient(
             device,

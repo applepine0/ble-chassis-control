@@ -4,6 +4,7 @@
     uv run python diagnose_serial.py            # 全量诊断
     uv run python diagnose_serial.py COM7       # 针对指定口
 """
+
 from __future__ import annotations
 
 import os

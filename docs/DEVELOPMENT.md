@@ -197,18 +197,22 @@ GUI 主线程 ──[run_coroutine_threadsafe]──> asyncio 后台守护线程
 ## 六、如何运行与验证
 
 ```powershell
-uv sync                              # 安装依赖(bleak + pyserial)
+uv sync                              # 安装依赖(bleak + pyserial + sv-ttk + dev ruff)
 
 uv run ble-chassis-control           # 启动 GUI
 uv run python -m ble_chassis_control # 等价
 
-# --- 测试(本机:5 套全绿;motion 2 项见第十一节)---
+# --- 测试(本机:5 套全绿;motion 1 项见第十一节)---
 uv run python tests/test_smoke.py         # 协议/后端/GUI 冒烟
 uv run python tests/test_gui_flow.py      # GUI 15 条路径(含 SET 缩放/运动中断开/放大曲线)
 uv run python tests/test_serial_backend.py # 串口后端 9 项(含探测/写超时/重连/只下发)
 uv run python tests/test_motion.py        # θ 积分/世界系定向 10 项
 uv run python tests/test_wheel_frame.py   # 二进制帧 14 项(CRC/丢帧/回绕/StreamDemux)
 uv run python tests/test_chart.py         # 曲线图 7 项
+
+# --- lint / format ---
+uv run ruff check src tests tools
+uv run ruff format --check src tests tools
 
 # --- 工具 ---
 uv run python tools/diagnose_serial.py        # 串口列表/占用诊断
@@ -283,7 +287,7 @@ uv run python tools/bench_hc06.py COM15 115200             # 吞吐基准
 ## 九、下一步建议(给接手者)
 
 1. **先读** `README.md`(协议 + 硬件结论)→ `docs/API.md`(全部 API);
-2. **跑测试** 确认环境正常(本机 5 套全绿;motion 2 项受 Windows 定时粒度影响,见第十一节);
+2. **跑测试** 确认环境正常(本机 5 套全绿;motion 1 项受 Windows 定时粒度影响,见第十一节);
 3. **接 MCU**:由底盘固件按 [`docs/MCU-INTERFACE.md`](MCU-INTERFACE.md) 实现解析、CRC 与 11B 帧发送;
    本仓库只负责上位机与协议文档,不提供 MCU 侧代码;
 4. **端到端验证**:GUI 发 VEL → 底盘动作 → 回传四轮 rpm → 曲线滚动;
@@ -308,7 +312,7 @@ uv run python tools/bench_hc06.py COM15 115200             # 吞吐基准
 | `src/ble_chassis_control/config.py` | **所有可调参数集中于此**(含 `UI_THEME`) |
 | `docs/API.md` | 完整接口文档(13 章) |
 | `docs/MCU-INTERFACE.md` | **底盘 MCU 接口文档**(交给嵌入式同事) |
-| `tests/` | 6 套测试(本机 5 套全绿;motion 8/10;wheel 14 项/GUI 15 路径;serial 9 项) |
+| `tests/` | 6 套测试(本机 5 套全绿;motion 9/10;wheel 14 项/GUI 15 路径;serial 9 项) |
 
 ---
 
@@ -330,6 +334,6 @@ uv run python tools/bench_hc06.py COM15 115200             # 吞吐基准
 
 | # | 问题 | 说明 | 建议 |
 | :--- | :--- | :--- | :--- |
-| 8 | **定频下发频率偏低** | 20Hz 设定约 17 帧/s;50Hz 约 32.2Hz;`test_motion.py` 2 项失败 | 可选 `winmm.timeBeginPeriod(1)`;或调整测试容差并标注平台差异 |
+| 8 | **定频下发频率偏低** | 20Hz 设定约 17 帧/s;50Hz 约 32.2Hz;`test_motion.py` 的 `test_rate_accuracy` 1 项失败 | 可选 `winmm.timeBeginPeriod(1)`;或调整测试容差并标注平台差异 |
 
 > P0/P1 已修复并有回归测试;剩余一项不影响手动遥控。

@@ -27,13 +27,14 @@ MCU 用 ``ω`` 驱动**车体自转**,车头姿态 φ(t) = ∫ω dt。
    世界系方向将以 2ω 变化 —— 这正是"偏心转"的典型成因。
    MCU 端必须**不积分 θ**,只按收到的 (v, θ, ω) 做逆解。
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Optional
 
 from .link import ChassisLink, LinkError
 
@@ -56,11 +57,11 @@ def normalize_deg(deg: float) -> float:
 class MotionTick:
     """一次下发的快照(供回调/日志使用)。"""
 
-    elapsed: float        # 自启动以来的秒数
-    theta_deg: float      # 当前累积方向角
-    v_mps: float          # 速度大小
-    omega_radps: float    # 自转角速度
-    index: int            # 第几次下发(0 起)
+    elapsed: float  # 自启动以来的秒数
+    theta_deg: float  # 当前累积方向角
+    v_mps: float  # 速度大小
+    omega_radps: float  # 自转角速度
+    index: int  # 第几次下发(0 起)
 
 
 class MotionRunner:
@@ -88,7 +89,7 @@ class MotionRunner:
         theta0: float,
         omega: float,
         rate_hz: float | None = None,
-        on_tick: Optional[Callable[[MotionTick], None]] = None,
+        on_tick: Callable[[MotionTick], None] | None = None,
         stop_on_error: bool = True,
         sign: float | None = None,
     ) -> None:
@@ -173,9 +174,7 @@ class MotionRunner:
                 dt = now - last
                 last = now
                 if abs(self.omega) > 1e-9:
-                    theta = normalize_deg(
-                        theta + self.sign * self.omega * dt * _RAD2DEG
-                    )
+                    theta = normalize_deg(theta + self.sign * self.omega * dt * _RAD2DEG)
 
                 # 2) 定频下发
                 try:
@@ -211,9 +210,7 @@ class MotionRunner:
                 except Exception as exc:
                     logger.warning("停止时发送 STOP 失败: %s", exc)
                     if not self.last_error:
-                        self.last_error = (
-                            f"STOP 下发失败:{type(exc).__name__}: {exc}"
-                        )
+                        self.last_error = f"STOP 下发失败:{type(exc).__name__}: {exc}"
             return elapsed
         finally:
             self._running = False

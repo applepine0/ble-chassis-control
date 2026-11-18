@@ -4,6 +4,7 @@
 连续触发 GetGattServicesWithCacheModeAsync(UNCACHED) 4 次,
 验证 Windows 是否在某次重试后才拿到服务(部分外设有此行为)。
 """
+
 import asyncio
 import traceback
 
@@ -25,21 +26,22 @@ async def main() -> None:
             try:
                 async with asyncio.timeout(15):
                     result = await FutureLike(
-                        dev.get_gatt_services_with_cache_mode_async(
-                            BluetoothCacheMode.UNCACHED
-                        )
+                        dev.get_gatt_services_with_cache_mode_async(BluetoothCacheMode.UNCACHED)
                     )
-                print(f"   status={int(result.status)} services={len(list(result.services))}", flush=True)
+                print(
+                    f"   status={int(result.status)} services={len(list(result.services))}",
+                    flush=True,
+                )
                 for s in list(result.services)[:6]:
                     print(f"     - {s.uuid}", flush=True)
                 if list(result.services):
                     print("== ✓ 同会话重试成功!", flush=True)
                     return
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 print("   15s 超时", flush=True)
             except Exception as exc:
                 print(f"   异常 {type(exc).__name__}: {exc}", flush=True)
-                    # 不重连,下一次循环继续
+                # 不重连,下一次循环继续
         print("\n== 4 次同会话枚举全部超时 —— 会话内重试也无效")
     finally:
         try:

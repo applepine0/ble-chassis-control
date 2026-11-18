@@ -4,6 +4,7 @@
 
 帧格式:[0]=0xAA [1]=seq [2:10]=4×int16 LE [10]=crc8(0x07)
 """
+
 import os
 import sys
 
@@ -13,7 +14,6 @@ from ble_chassis_control import config  # noqa: E402
 from ble_chassis_control.protocol import (  # noqa: E402
     FRAME_HEAD,
     FRAME_LEN,
-    WHEEL_COUNT,
     Protocol,
     StreamDemux,
     WheelFrameParser,
@@ -50,7 +50,7 @@ def test_roundtrip() -> None:
     d = decode_wheel_frame(mk(3, vals))
     assert d is not None
     assert d.seq == 3
-    for a, b in zip(d.speeds, vals):
+    for a, b in zip(d.speeds, vals, strict=False):
         assert abs(a - b) < 1e-9, (a, b)
     assert d.unit == config.WHEEL_SPEED_UNIT
     print(f"3) 编解码回环 {vals} -> {d.speeds} {d.unit}: OK")
@@ -70,7 +70,7 @@ def test_wheel_order_labeling() -> None:
 def test_crc_rejects_corruption() -> None:
     """任意单字节篡改都应被 CRC 拒绝。"""
     f = bytearray(mk(1, [1.0, 2.0, 3.0, 4.0]))
-    for i in range(len(f) - 1):        # 不动 CRC 本身
+    for i in range(len(f) - 1):  # 不动 CRC 本身
         bad = bytearray(f)
         bad[i] ^= 0xFF
         assert decode_wheel_frame(bytes(bad)) is None, f"第 {i} 字节篡改未被发现"
@@ -102,12 +102,13 @@ def test_parser_loss_detection() -> None:
     p.feed(mk(0, [0, 0, 0, 0]))
     p.feed(mk(1, [0, 0, 0, 0]))
     assert p.stats.frames_lost == 0
-    p.feed(mk(5, [0, 0, 0, 0]))       # 丢了 2,3,4
+    p.feed(mk(5, [0, 0, 0, 0]))  # 丢了 2,3,4
     assert p.stats.frames_lost == 3, p.stats.frames_lost
     assert p.stats.frames_ok == 3
     assert 0.49 < p.stats.loss_rate < 0.51, p.stats.loss_rate
-    print(f"7) 丢帧检测: 跳过 2,3,4 -> 丢帧={p.stats.frames_lost},"
-          f" 丢帧率={p.stats.loss_rate:.0%}: OK")
+    print(
+        f"7) 丢帧检测: 跳过 2,3,4 -> 丢帧={p.stats.frames_lost}, 丢帧率={p.stats.loss_rate:.0%}: OK"
+    )
 
 
 def test_parser_seq_wraparound() -> None:
@@ -132,8 +133,7 @@ def test_parser_garbage_and_recovery() -> None:
     p.feed(bytes(bad) + mk(8, [8, 8, 8, 8]))
     assert p.stats.frames_ok == 2, p.stats
     assert p.stats.crc_errors >= 1, p.stats
-    print(f"9) 垃圾字节({p.stats.garbage_bytes}B)+坏帧恢复"
-          f"(CRC 错 {p.stats.crc_errors} 次): OK")
+    print(f"9) 垃圾字节({p.stats.garbage_bytes}B)+坏帧恢复(CRC 错 {p.stats.crc_errors} 次): OK")
 
 
 def test_mixed_with_text_lines() -> None:

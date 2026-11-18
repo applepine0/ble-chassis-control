@@ -10,7 +10,7 @@
 ## ⚡ 快速开始(Windows)
 
 ```powershell
-uv sync                        # 安装依赖(bleak + pyserial)
+uv sync                        # 安装依赖(bleak + pyserial + sv-ttk + dev ruff)
 uv run ble-chassis-control     # 启动 GUI
 # 或
 uv run python -m ble_chassis_control
@@ -298,6 +298,10 @@ uv run python tests/test_motion.py       # MotionRunner 测试:θ 累积/世界�
 uv run python tests/test_wheel_frame.py  # 四轮速度帧:CRC/丢帧/回绕/混流(14 项)
 uv run python tests/test_chart.py        # 曲线图:环形缓冲/量程/绘制(7 项)
 uv run python tests/test_serial_backend.py  # 串口后端功能测试(9 项,含探测/写超时/重连/只下发)
+
+# --- lint / format(ruff 已在 dev 依赖中)---
+uv run ruff check src tests tools
+uv run ruff format --check src tests tools
 ```
 
 ## 参考资料

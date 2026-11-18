@@ -8,6 +8,7 @@
 
 GUI 入口保留为惰性函数,调用时才导入 frontend。
 """
+
 from __future__ import annotations
 
 __all__ = ["main"]

@@ -4,6 +4,7 @@
 若裸调用成功 => Bleak 会话层问题,可研发绕行方案;
 若同样挂起   => 模块侧确证(证据链闭环)。
 """
+
 import asyncio
 import traceback
 from uuid import UUID
@@ -30,10 +31,14 @@ async def enumerate_once(label: str, op_fn) -> None:
             svc = svcs[0]
             async with asyncio.timeout(25):
                 cresult = await FutureLike(svc.get_characteristics_async())
-            print(f"  特征 status={int(cresult.status)}, 数量={len([c for c in cresult.characteristics])}")
+            print(
+                f"  特征 status={int(cresult.status)}, 数量={len([c for c in cresult.characteristics])}"
+            )
             for c in cresult.characteristics:
-                print(f"    - {c.uuid} props={c.characteristic_properties} handle={c.attribute_handle}")
-    except asyncio.TimeoutError:
+                print(
+                    f"    - {c.uuid} props={c.characteristic_properties} handle={c.attribute_handle}"
+                )
+    except TimeoutError:
         print(f"  !! 25s 超时 —— {label} 挂起", flush=True)
     except Exception as exc:
         print(f"  !! 异常 {type(exc).__name__}: {exc}", flush=True)

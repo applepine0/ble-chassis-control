@@ -6,12 +6,13 @@
   * 所有 IO 方法均为 async(串口后端用 asyncio.to_thread 包装阻塞 IO),
     这样前端的 asyncio 后台线程模型对两种后端完全一致。
 """
+
 from __future__ import annotations
 
-import asyncio
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from .protocol import ParsedMessage
 
@@ -46,14 +47,14 @@ class ChassisLink(ABC):
         *,
         on_line: OnLineCallback | None = None,
         on_state: OnStateCallback | None = None,
-        on_wheel: "Callable[[Any], None] | None" = None,
-        on_stats: "Callable[[Any], None] | None" = None,
+        on_wheel: Callable[[Any], None] | None = None,
+        on_stats: Callable[[Any], None] | None = None,
     ) -> None:
         self._on_line = on_line
         self._on_state = on_state
         # 公开只读信息(前端展示用)
-        self.detail_text: str = ""     # 链路细节(GATT 树 / 串口参数)
-        self.mtu: int = 0              # BLE 有值;串口后端为 0
+        self.detail_text: str = ""  # 链路细节(GATT 树 / 串口参数)
+        self.mtu: int = 0  # BLE 有值;串口后端为 0
         self.last_error: str = ""
         # 单缓冲解复用:二进制帧优先,其余字节按文本行分帧。
         # 属性名 wheel_parser 保留,兼容既有代码/文档中的 stats 访问。

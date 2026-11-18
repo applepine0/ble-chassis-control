@@ -8,13 +8,13 @@
     2. 「写入 OK」—— 已向 FFE1 发送一行文本;
     3. 「收到 N 字节」—— 若底盘 MCU 有回传(遥测/回显)会在此显示。
 """
+
 import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 
 import asyncio
-import time
 
 from bleak import BleakClient, BleakScanner
 
@@ -32,7 +32,10 @@ async def main() -> None:
         return
     print(f"    找到: name={device.name!r} address={device.address}", flush=True)
 
-    print(f"==> 2) 连接({config.CONNECT_OP_TIMEOUT}s 超时,重试 {config.CONNECT_MAX_ATTEMPTS} 次) ...", flush=True)
+    print(
+        f"==> 2) 连接({config.CONNECT_OP_TIMEOUT}s 超时,重试 {config.CONNECT_MAX_ATTEMPTS} 次) ...",
+        flush=True,
+    )
     client = None
     for attempt in range(1, config.CONNECT_MAX_ATTEMPTS + 1):
         try:
@@ -74,7 +77,7 @@ async def main() -> None:
         await client.disconnect()
         return
 
-    print(f"==> 4) 写 FFE1(形式验证:写入 '{Protocol.encode_mot(0,0)!r}') ...", flush=True)
+    print(f"==> 4) 写 FFE1(形式验证:写入 '{Protocol.encode_mot(0, 0)!r}') ...", flush=True)
     payload = Protocol.encode_mot(0.0, 0.0)
     try:
         await client.write_gatt_char(write_char, payload, response=False)
@@ -98,7 +101,7 @@ async def main() -> None:
         print(f"    << 收到通知: {text!r}", flush=True)
 
     if notify_char is not None:
-        print(f"==> 5) 订阅通知并等待 5s(底盘回传将在此出现) ...", flush=True)
+        print("==> 5) 订阅通知并等待 5s(底盘回传将在此出现) ...", flush=True)
         try:
             await client.start_notify(notify_char, on_notify)
         except Exception as exc:

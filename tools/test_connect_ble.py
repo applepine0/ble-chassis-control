@@ -1,7 +1,9 @@
 import asyncio
+
 from bleak import BleakClient
 
 ADDRESS = "7B:B7:05:04:23:A2"
+
 
 async def main():
     print(f"连接 {ADDRESS} ...")
@@ -15,5 +17,6 @@ async def main():
                 print(f"    属性: {char.properties}")
                 print(f"    描述: {char.description}")
             print()
+
 
 asyncio.run(main())

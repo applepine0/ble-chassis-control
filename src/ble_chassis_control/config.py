@@ -38,12 +38,12 @@ LINK_KIND = "serial"
 # 串口链路(HC-05 经典蓝牙 SPP / USB-TTL 有线)
 #   SERIAL_PORT 留空则自动检测:仅有一个串口时直接使用
 # ---------------------------------------------------------------------------
-SERIAL_PORT = ""             # 例:"COM5";空字符串 = 自动检测
-SERIAL_BAUDRATE = 115200     # HC-06 已改为 115200(必须与模块/MCU 端一致!)
-SERIAL_TIMEOUT = 0.2         # 读超时(秒),影响读取线程响应速度
-SERIAL_WRITE_TIMEOUT = 2.0   # 写超时(秒)
-SERIAL_PROBE_ON_CONNECT = True   # 打开串口后先写一条 STOP 探测链路
-SERIAL_PROBE_TIMEOUT = 2.5       # 连接探测(写+flush)超时(秒);首帧蓝牙可能较慢
+SERIAL_PORT = ""  # 例:"COM5";空字符串 = 自动检测
+SERIAL_BAUDRATE = 115200  # HC-06 已改为 115200(必须与模块/MCU 端一致!)
+SERIAL_TIMEOUT = 0.2  # 读超时(秒),影响读取线程响应速度
+SERIAL_WRITE_TIMEOUT = 2.0  # 写超时(秒)
+SERIAL_PROBE_ON_CONNECT = True  # 打开串口后先写一条 STOP 探测链路
+SERIAL_PROBE_TIMEOUT = 2.5  # 连接探测(写+flush)超时(秒);首帧蓝牙可能较慢
 
 # 界面下拉可选的波特率(HC-06 编码表:4=9600, 8=115200)
 SERIAL_BAUD_CHOICES = [9600, 19200, 38400, 57600, 115200, 230400]
@@ -51,18 +51,18 @@ SERIAL_BAUD_CHOICES = [9600, 19200, 38400, 57600, 115200, 230400]
 # ---------------------------------------------------------------------------
 # 连接参数(针对 Windows 蓝牙栈 GATT 枚举挂起问题的加固配置)
 # ---------------------------------------------------------------------------
-SCAN_TIMEOUT = 10.0          # 每次扫描等待设备出现的时间(秒)
-CONNECT_OP_TIMEOUT = 40.0    # 单次连接内 GATT 操作超时(秒),Windows 默认 30s 常不够
-CONNECT_MAX_ATTEMPTS = 5     # 连接失败后的自动重试次数
-CONNECT_RETRY_DELAY = 2.0    # 重试间隔(秒)
+SCAN_TIMEOUT = 10.0  # 每次扫描等待设备出现的时间(秒)
+CONNECT_OP_TIMEOUT = 40.0  # 单次连接内 GATT 操作超时(秒),Windows 默认 30s 常不够
+CONNECT_MAX_ATTEMPTS = 5  # 连接失败后的自动重试次数
+CONNECT_RETRY_DELAY = 2.0  # 重试间隔(秒)
 USE_CACHED_SERVICES = False  # False 强制 UNCACHED 读取 GATT,规避 Windows 缓存问题
-ADDRESS_TYPE = "public"      # 已验证:JDY-23 在 Windows 缓存中为 public(random 会找不到设备)
+ADDRESS_TYPE = "public"  # 已验证:JDY-23 在 Windows 缓存中为 public(random 会找不到设备)
 
 # 收发参数
-WRITE_TIMEOUT = 5.0          # 单次写入超时(秒)
-WRITE_WITH_RESPONSE = None   # None=自动(优先 W/O response,失败回退);True/False 强制
-RECONNECT_ON_DROP = True     # 意外断开后是否自动重连
-RECONNECT_DELAY = 5.0        # 掉线后重连等待(秒);失败则按此间隔继续重试
+WRITE_TIMEOUT = 5.0  # 单次写入超时(秒)
+WRITE_WITH_RESPONSE = None  # None=自动(优先 W/O response,失败回退);True/False 强制
+RECONNECT_ON_DROP = True  # 意外断开后是否自动重连
+RECONNECT_DELAY = 5.0  # 掉线后重连等待(秒);失败则按此间隔继续重试
 
 # ---------------------------------------------------------------------------
 # 协议 / 界面
@@ -102,19 +102,19 @@ def set_scale(name: str) -> int:
 
 # --- 速度矢量指令(VEL)的 UI 范围 ----------------------------------------
 # 协议层不额外设限(仅 int16 定点钳位,见 protocol.py);此处只约束界面控件范围。
-VEL_UI_MAX = 5.0        # 速度大小滑块上限,m/s
-DEG_UI_MIN = -180.0     # 方向角范围,deg(UI 约定:0°=正前,逆时针为正)
+VEL_UI_MAX = 5.0  # 速度大小滑块上限,m/s
+DEG_UI_MIN = -180.0  # 方向角范围,deg(UI 约定:0°=正前,逆时针为正)
 DEG_UI_MAX = 180.0
-OMEGA_UI_MIN = -6.28    # 自转角速度范围,rad/s(约 ±2π)
+OMEGA_UI_MIN = -6.28  # 自转角速度范围,rad/s(约 ±2π)
 OMEGA_UI_MAX = 6.28
 
 # --- 定频运动下发(MotionRunner)----------------------------------------
 # 启动后按此频率持续下发 θ(t) = θ₀ + SIGN·∫ω dt,直到点"停止运动"。
 # 9600 波特率下 VEL 帧约 16 字节 → 20Hz 约占用 33% 带宽(留余量给遥测)。
-MOTION_RATE_HZ = 20.0   # 下发频率 Hz
-MOTION_RATE_MIN = 1.0   # 界面允许范围
+MOTION_RATE_HZ = 20.0  # 下发频率 Hz
+MOTION_RATE_MIN = 1.0  # 界面允许范围
 MOTION_RATE_MAX = 50.0
-MOTION_STOP_ON_ERROR = True   # 下发失败时是否自动停止(并向底盘发 STOP)
+MOTION_STOP_ON_ERROR = True  # 下发失败时是否自动停止(并向底盘发 STOP)
 
 # θ 累积符号 —— 决定"旋转前进"的物理含义(详见 motion.py 模块文档):
 #   -1(默认):θ_body 反向补偿车体自转 ⇒ 世界系方向恒定
@@ -134,12 +134,12 @@ THETA_ACCUM_SIGN = -1.0
 # 物理量 × WHEEL_SPEED_SCALE = 线上 int16。缩放 1 → 线上即 rpm 整数(±32767 rpm)。
 WHEEL_SPEED_SCALE = 1.0
 WHEEL_SPEED_UNIT = "rpm"
-WHEEL_NAMES = ("右前", "左前", "左后", "右后")   # 与 w0~w3 对应,供界面显示
+WHEEL_NAMES = ("右前", "左前", "左后", "右后")  # 与 w0~w3 对应,供界面显示
 # 反馈频率建议(MCU 侧采用;上位机只显示):
 #   @115200 下 100Hz × 11B = 1100 B/s,仅占带宽 ~9.5%
 WHEEL_FEEDBACK_HZ = 100.0
 
 # --- 四轮转速曲线图(chart.py)-----------------------------------------
-CHART_MAXLEN = 600      # 保留最近 N 个采样点(@100Hz ≈ 6 秒窗口)
-CHART_REDRAW_MS = 50    # 重绘节流(毫秒)→ 20fps;100Hz 数据也不会拖慢界面
-CHART_HEIGHT = 150      # 曲线画布高度(像素)
+CHART_MAXLEN = 600  # 保留最近 N 个采样点(@100Hz ≈ 6 秒窗口)
+CHART_REDRAW_MS = 50  # 重绘节流(毫秒)→ 20fps;100Hz 数据也不会拖慢界面
+CHART_HEIGHT = 150  # 曲线画布高度(像素)

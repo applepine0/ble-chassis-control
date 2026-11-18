@@ -1,16 +1,16 @@
 """冒烟测试:协议编解码 + 后端/前端可加载、GUI 可创建(不连硬件)。"""
 
-import sys
 import os
-import time
+import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 
-from ble_chassis_control import config          # noqa: E402
-from ble_chassis_control.protocol import (      # noqa: E402
-    Protocol, ParsedMessage, decode_line,
-)
 from ble_chassis_control.backend import BLEBackend  # noqa: E402
+from ble_chassis_control.protocol import (  # noqa: E402
+    ParsedMessage,
+    Protocol,
+    decode_line,
+)
 
 
 def test_protocol() -> None:
@@ -75,7 +75,7 @@ def test_protocol() -> None:
     backend._on_notify(None, bytearray(b"IND:0\r"))
     assert lines == [], "未到换行不应分发"
     backend._on_notify(None, bytearray(b"\nmore\n"))
-    assert [l for l, _ in lines] == ["IND:0\r", "more"], lines
+    assert [line for line, _ in lines] == ["IND:0\r", "more"], lines
 
     print("protocol + backend 组帧: OK")
 

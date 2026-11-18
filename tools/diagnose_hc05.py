@@ -8,6 +8,7 @@
     * 打开串口后持续读数据,记录任何中断/异常
     * 记录时间线,定位"几秒后断开"发生在哪个阶段
 """
+
 from __future__ import annotations
 
 import os
@@ -58,12 +59,12 @@ def main() -> None:
         return
 
     t0 = time.time()
-    print(f"  ✓ 打开成功")
+    print("  ✓ 打开成功")
     print(f"  CDC/状态: CD={ser.cd}  CTS={ser.cts}  DSR={ser.dsr}  RI={ser.ri}")
     print("  (若 CTS/DSR 为 False,可能对端未就绪)")
 
     # 2) 尝试发送探测
-    print(f"\n[T+{time.time()-t0:.1f}s] 发送探测字节 'AT\\r\\n' ...")
+    print(f"\n[T+{time.time() - t0:.1f}s] 发送探测字节 'AT\\r\\n' ...")
     try:
         ser.write(b"AT\r\n")
         ser.flush()
@@ -72,7 +73,7 @@ def main() -> None:
         print(f"  ✗ 写入失败: {type(exc).__name__}: {exc}")
 
     # 3) 持续监听,记录掉线时刻
-    print(f"\n[T+{time.time()-t0:.1f}s] 开始监听(观察是否掉线)...")
+    print(f"\n[T+{time.time() - t0:.1f}s] 开始监听(观察是否掉线)...")
     last_data = time.time()
     total = 0
     drop_time = None

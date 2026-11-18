@@ -3,8 +3,10 @@
 与之前 40s 长会话重试不同:快速建链-枚举-拆链循环,
 用于发现「固件 GATT 偶发可用」的情况。
 """
+
 import asyncio
 import traceback
+
 from bleak import BleakClient, BleakScanner
 
 ADDRESS = "7B:B7:05:04:23:A2"

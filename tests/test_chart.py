@@ -2,6 +2,7 @@
 
 验证:环形缓冲、保留最新、绘制产出、清空、空数据容错、纵轴量程。
 """
+
 import os
 import sys
 import types
@@ -55,9 +56,7 @@ class _FakeFrame:
             if key in ("background", "bg"):
                 # tk.Label 允许;ttk 控件不允许 —— 由子类覆盖 _ALLOWED_CGET 决定
                 if "background" not in self._ALLOWED_CGET:
-                    raise TypeError(
-                        f"unknown option '-{key}' (ttk widget 不支持背景色)"
-                    )
+                    raise TypeError(f"unknown option '-{key}' (ttk widget 不支持背景色)")
 
     def columnconfigure(self, *a, **k):
         pass
@@ -90,11 +89,11 @@ class _FakeTtkLabel(_FakeFrame):
 def _install_tk_stub() -> None:
     tk = types.ModuleType("tkinter")
     tk.Canvas = _FakeCanvas
-    tk.Label = _FakeTkLabel                      # tk.Label:支持 bg
+    tk.Label = _FakeTkLabel  # tk.Label:支持 bg
     tk.StringVar = lambda **k: types.SimpleNamespace(get=lambda: "", set=lambda v: None)
     tk.BooleanVar = lambda **k: types.SimpleNamespace(get=lambda: True, set=lambda v: None)
     ttk = types.ModuleType("tkinter.ttk")
-    ttk.Frame = _FakeFrame                       # ttk:不支持 bg
+    ttk.Frame = _FakeFrame  # ttk:不支持 bg
     ttk.Label = _FakeTtkLabel
     for name in ("Checkbutton", "Button", "LabelFrame"):
         setattr(ttk, name, _FakeFrame)
@@ -159,7 +158,7 @@ def test_clear_and_empty_draw() -> None:
         c.push((i, i, i, i))
     c.clear()
     assert all(len(d) == 0 for d in c._series)
-    c._draw(force=True)          # 空数据
+    c._draw(force=True)  # 空数据
     print("4) 清空 + 空数据绘制容错: OK")
 
 
@@ -183,7 +182,7 @@ def test_single_sample_no_crash() -> None:
     ch = _load_chart()
     c = ch.WheelChart(None, names=NAMES, maxlen=10)
     c.push((10.0, 10.0, 10.0, 10.0))
-    c._draw(force=True)          # n<2,应跳过曲线
+    c._draw(force=True)  # n<2,应跳过曲线
     print("6) 单采样点不连线(容错): OK")
 
 
@@ -197,12 +196,13 @@ def test_no_ttk_background_option() -> None:
     ch.WheelChart(None, names=NAMES, unit="rpm", maxlen=10)
     # 直接验证桩行为确实会拦截(确保测试本身有效)
     import tkinter as tk
+
     try:
-        tk.Label(None, text="x", bg="#fff")          # tk.Label 允许
+        tk.Label(None, text="x", bg="#fff")  # tk.Label 允许
     except TypeError:
-        raise AssertionError("tk.Label 应允许背景色")
+        raise AssertionError("tk.Label 应允许背景色") from None
     try:
-        tk.ttk.Frame(None, background="#fff")        # ttk 不允许
+        tk.ttk.Frame(None, background="#fff")  # ttk 不允许
     except TypeError:
         pass
     else:

@@ -2,6 +2,7 @@
 
 不接触硬件;验证前端线程模型、队列回传、按钮逻辑与日志渲染整条链路。
 """
+
 import asyncio
 import os
 import sys
@@ -89,8 +90,9 @@ def run() -> None:
         app.on_send_vel()
         pump(app, 0.5)
         assert fake.sent == ["VEL:0.5,90.0,-0.5"], fake.sent
-        assert "TX> VEL 0.5 m/s, 90°, -0.5 rad/s" in app.log.get("1.0", "end"), \
-            app.log.get("1.0", "end")
+        assert "TX> VEL 0.5 m/s, 90°, -0.5 rad/s" in app.log.get("1.0", "end"), app.log.get(
+            "1.0", "end"
+        )
         print("2) VEL 速度矢量发送 + TX 日志: OK")
 
         # 3) 急停
@@ -150,7 +152,7 @@ def run() -> None:
             return True
 
         fake.connect = counting_connect
-        app.on_connect()   # 已在连接状态
+        app.on_connect()  # 已在连接状态
         pump(app, 0.6)
         assert n_calls[0] == 0, f"已连接时不应再次调用 connect,实际调用 {n_calls[0]} 次"
         log = app.log.get("1.0", "end")

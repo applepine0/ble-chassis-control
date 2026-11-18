@@ -4,8 +4,10 @@
   任一对照设备 GATT 枚举成功  => PC 栈健康,JDY-23 模块 100% 有恙;
   全部设备同样超时            => Realtek BLE 栈系统性问题,模块可能无辜。
 """
+
 import asyncio
 import traceback
+
 from bleak import BleakClient, BleakScanner
 
 # 从近期扫描中挑出的可连接设备(可能需配对,仅作定性判断)

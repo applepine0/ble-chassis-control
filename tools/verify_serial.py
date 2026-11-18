@@ -10,6 +10,7 @@
 注意:连接是"打开即连"—— 脚本退出/断开串口会同时断开蓝牙链路,
 导致 HC-05/06 红灯回到闪烁。要持续遥控请用 --hold 或直接开 GUI。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -58,7 +59,8 @@ async def main() -> None:
             print(f"    [{stamp}] << {text}   ({kind})", flush=True)
 
     link = SerialBackend(
-        port, baud,
+        port,
+        baud,
         on_line=on_line,
         on_state=lambda t: print(f"    [状态] {t}", flush=True),
     )
@@ -74,7 +76,7 @@ async def main() -> None:
         return
 
     print(f"==> 已打开: {link.target}")
-    print(f"    ⚠ 保持连接即可让 HC-05/06 红灯常亮;关闭脚本会断开蓝牙")
+    print("    ⚠ 保持连接即可让 HC-05/06 红灯常亮;关闭脚本会断开蓝牙")
 
     try:
         if send_cmd:
@@ -87,7 +89,7 @@ async def main() -> None:
                     print(f"!! 发送失败:{exc}")
                 await asyncio.sleep(0.5)
         elif hold:
-            print(f"==> 保持连接(红灯应常亮)。Ctrl+C 停止 ...")
+            print("==> 保持连接(红灯应常亮)。Ctrl+C 停止 ...")
             while True:
                 await asyncio.sleep(1.0)
         else:

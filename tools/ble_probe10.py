@@ -4,6 +4,7 @@
 若模块固件广播-睡眠窗口切换频繁(对 AT+STARTEN 1 不敏感时也可能),热连接可命中唤醒窗口。
 成功即:枚举 GATT → 写 FFE1(MOT:0,0)→ 订阅通知等 3s。
 """
+
 import os
 import sys
 
@@ -35,7 +36,7 @@ async def attempt(label: str) -> None:
     try:
         try:
             await asyncio.wait_for(got.wait(), timeout=15.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             print("!! 15s 内未捕获广播包")
             return
         dev = holder["dev"]
@@ -71,7 +72,9 @@ async def attempt(label: str) -> None:
                     print(f"-- 写入 FFE1 OK (response={response})", flush=True)
                     break
                 except Exception as exc:
-                    print(f"-- 写入 response={response} 失败: {type(exc).__name__}: {exc}", flush=True)
+                    print(
+                        f"-- 写入 response={response} 失败: {type(exc).__name__}: {exc}", flush=True
+                    )
         else:
             print("-- 未找到 FFE1", flush=True)
 
