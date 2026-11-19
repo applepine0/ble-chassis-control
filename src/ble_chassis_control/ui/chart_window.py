@@ -10,7 +10,7 @@ from collections.abc import Callable
 
 from .. import config
 from ..chart import WheelChart
-from .theme import Palette
+from .theme import FONT_CHART, FONT_CHART_SMALL, FONT_LEGEND, Palette
 
 
 class ChartWindow(tk.Toplevel):
@@ -46,6 +46,9 @@ class ChartWindow(tk.Toplevel):
             grid=palette.chart_grid,
             axis=palette.chart_axis,
             text=palette.chart_text,
+            font_small=FONT_CHART_SMALL,
+            font_unit=FONT_CHART,
+            font_legend=FONT_LEGEND,
         )
         self.chart.pack(fill="both", expand=True, padx=8, pady=8)
 

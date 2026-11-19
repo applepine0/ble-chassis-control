@@ -54,6 +54,9 @@ class WheelChart(ttk.Frame):
         grid: str = C_GRID,
         axis: str = C_AXIS,
         text: str = C_TEXT,
+        font_small: str | tuple = ("Consolas", 7),
+        font_unit: str | tuple = ("Consolas", 8),
+        font_legend: str | tuple = ("", 11),
         on_expand: Callable[[], None] | None = None,
         **kwargs,
     ) -> None:
@@ -67,6 +70,9 @@ class WheelChart(ttk.Frame):
         self._grid = grid
         self._axis = axis
         self._text = text
+        self._font_small = font_small
+        self._font_unit = font_unit
+        self._font_legend = font_legend
 
         self._series: list[deque[float]] = [deque(maxlen=maxlen) for _ in names]
         self._last_push = 0.0
@@ -84,8 +90,12 @@ class WheelChart(ttk.Frame):
         for i, (name, color) in enumerate(zip(names, self.colors, strict=False)):
             # 注意:ttk.Frame 不支持 cget("background")(styled widget),
             # 故图例色块用 tk.Label,背景由父容器继承(不显式设置)。
-            tk.Label(top, text="■", fg=color, font=("", 11)).grid(row=0, column=i, padx=(0, 1))
-            ttk.Label(top, text=name).grid(row=0, column=i + 10, padx=(0, 8))
+            tk.Label(top, text="■", fg=color, font=self._font_legend).grid(
+                row=0, column=i, padx=(0, 1)
+            )
+            ttk.Label(top, text=name, font=self._font_legend).grid(
+                row=0, column=i + 10, padx=(0, 8)
+            )
         ttk.Checkbutton(
             top,
             text="自动量程",
@@ -133,6 +143,10 @@ class WheelChart(ttk.Frame):
         self._dirty = True
         if any(self._series):
             self._frozen_var.set("")
+        self._draw(force=True)
+
+    def redraw(self) -> None:
+        """立即重绘(字体/配色变化后调用)。"""
         self._draw(force=True)
 
     # ------------------------------------------------------------------
@@ -191,7 +205,12 @@ class WheelChart(ttk.Frame):
             v = hi - (hi - lo) * k / 4
             c.create_line(0, y, w, y, fill=self._grid)
             c.create_text(
-                4, y + 6, anchor="w", fill=self._text, text=f"{v:+.0f}", font=("Consolas", 7)
+                4,
+                y + 6,
+                anchor="w",
+                fill=self._text,
+                text=f"{v:+.0f}",
+                font=self._font_small,
             )
 
         # 零线加粗
@@ -216,4 +235,11 @@ class WheelChart(ttk.Frame):
                 c.create_line(*pts, fill=self.colors[idx % len(self.colors)], width=1, smooth=False)
 
         # 单位标注
-        c.create_text(w - 4, 8, anchor="ne", fill=self._text, text=self.unit, font=("Consolas", 8))
+        c.create_text(
+            w - 4,
+            8,
+            anchor="ne",
+            fill=self._text,
+            text=self.unit,
+            font=self._font_unit,
+        )

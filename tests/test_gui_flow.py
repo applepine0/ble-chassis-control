@@ -256,6 +256,31 @@ def run() -> None:
         assert app.chart_window is None
         print("15) 放大曲线独立窗口: OK")
 
+        # 16) 字体设置:应用后命名字体与日志控件同步
+        import tkinter.font as tkfont
+
+        old_save = fe.save_font_settings
+        fe.save_font_settings = lambda _s: None
+        try:
+            app.on_font_settings()
+            pump(app, 0.2)
+            assert app.settings_window is not None
+            app.settings_window.ui_size_var.set(12)
+            app.settings_window._apply()
+            pump(app, 0.2)
+            assert app.font_settings.ui_size == 12
+            assert tkfont.nametofont("TkDefaultFont").cget("size") == 12
+            # 命名字体必须真实存在(不能被 Python GC 删掉)
+            assert tkfont.nametofont("AppLegendFont").cget("size") == 12
+            if "SunValleyBodyFont" in tkfont.names():
+                assert tkfont.nametofont("SunValleyBodyFont").cget("size") == 9
+            app.settings_window.close()
+            pump(app, 0.2)
+            assert app.settings_window is None
+        finally:
+            fe.save_font_settings = old_save
+        print("16) 字体设置窗口/应用: OK")
+
         print("\nGUI 功能测试(模拟链路)全部通过 ✓")
     finally:
         app.on_close()

@@ -10,6 +10,14 @@ from tkinter import ttk
 
 from .. import config
 from ..chart import WheelChart
+from .theme import (
+    FONT_BOLD,
+    FONT_CHART,
+    FONT_CHART_SMALL,
+    FONT_LEGEND,
+    FONT_LOG,
+    FONT_SMALL,
+)
 
 
 def build_main_ui(app) -> None:
@@ -61,14 +69,16 @@ def build_main_ui(app) -> None:
     app.btn_disc = ttk.Button(top, text="断开", command=app.on_disconnect, state="disabled")
     app.btn_disc.grid(row=0, column=7, padx=2)
     ttk.Button(top, text="自检", command=app.on_self_check).grid(row=0, column=8, padx=2)
+    app.btn_font = ttk.Button(top, text="字体", command=app.on_font_settings)
+    app.btn_font.grid(row=0, column=9, padx=2)
     app.status_var = tk.StringVar(value="未连接")
     app.status_label = ttk.Label(top, textvariable=app.status_var, foreground=app.palette.muted)
-    app.status_label.grid(row=0, column=9, sticky="e", padx=6)
+    app.status_label.grid(row=0, column=10, sticky="e", padx=6)
 
     # 第二行:串口列表/提示
     app.port_hint = tk.StringVar(value="")
     ttk.Label(top, textvariable=app.port_hint, foreground=app.palette.muted).grid(
-        row=1, column=0, columnspan=10, sticky="w", pady=(4, 0)
+        row=1, column=0, columnspan=11, sticky="w", pady=(4, 0)
     )
     app._sync_target_field()
 
@@ -146,7 +156,7 @@ def build_main_ui(app) -> None:
         ctrl,
         text="(UI 约定:车头坐标系,0°=正前,逆时针为正)",
         foreground=app.palette.muted,
-        font=("", 8),
+        font=FONT_SMALL,
     ).grid(row=3, column=0, columnspan=3, sticky="w", pady=(2, 0))
 
     btns = ttk.Frame(ctrl)
@@ -161,7 +171,7 @@ def build_main_ui(app) -> None:
         fg="white",
         activebackground=app.palette.danger_active,
         activeforeground="white",
-        font=("", 10, "bold"),
+        font=FONT_BOLD,
         width=12,
         relief="raised",
         bd=2,
@@ -201,7 +211,7 @@ def build_main_ui(app) -> None:
         motion,
         text="启动后按频率持续下发 θ(t)=θ₀−∫ω·dt(默认反向补偿车体自转)",
         foreground=app.palette.muted,
-        font=("", 8),
+        font=FONT_SMALL,
     ).grid(row=2, column=0, columnspan=4, sticky="w", pady=(4, 0))
 
     ttk.Separator(ctrl).grid(row=6, column=0, columnspan=3, sticky="ew", pady=6)
@@ -223,7 +233,7 @@ def build_main_ui(app) -> None:
         ctrl,
         textvariable=app.set_hint_var,
         foreground=app.palette.muted,
-        font=("", 8),
+        font=FONT_SMALL,
     ).grid(row=8, column=0, columnspan=3, sticky="w")
     app.set_name.bind("<<ComboboxSelected>>", lambda _e: app._update_set_hint())
     app.set_name.bind("<KeyRelease>", lambda _e: app._update_set_hint())
@@ -257,7 +267,7 @@ def build_main_ui(app) -> None:
         logf,
         state="disabled",
         wrap="word",
-        font=("Consolas", 10),
+        font=FONT_LOG,
         bg=app.palette.log_bg,
         fg=app.palette.text,
         insertbackground=app.palette.text,
@@ -298,6 +308,9 @@ def build_main_ui(app) -> None:
         grid=app.palette.chart_grid,
         axis=app.palette.chart_axis,
         text=app.palette.chart_text,
+        font_small=FONT_CHART_SMALL,
+        font_unit=FONT_CHART,
+        font_legend=FONT_LEGEND,
         on_expand=app.on_expand_chart,
     )
     app.chart.grid(row=0, column=0, sticky="ew")
@@ -311,7 +324,7 @@ def build_main_ui(app) -> None:
     ttk.Label(
         bottom,
         textvariable=app.wheel_var,
-        font=("Consolas", 10),
+        font=FONT_LOG,
     ).grid(row=0, column=0, sticky="w", pady=2)
 
     app.link_health_var = tk.StringVar(value="")

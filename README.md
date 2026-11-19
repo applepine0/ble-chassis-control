@@ -67,6 +67,7 @@ uv run python -m ble_chassis_control
 | 通信日志 | TX/RX 分色显示、带时间戳、自动滚动开关、5000 行上限、可清空 |
 | **四轮速度反馈** | 解析 11B 二进制帧并显示四轮实测转速(**rpm**,带轮位名) |
 | **四轮转速曲线** | 实时曲线图(纯 tkinter Canvas),四色区分 + 自动量程 + 零线 + **放大独立窗口** |
+| **字体设置** | 界面/等宽字体与字号可调,应用后日志、曲线同步;保存到 `%APPDATA%` |
 | **链路健康度** | 丢帧数/丢帧率、CRC 错误、杂散字节(seq 推断)、实测帧率 |
 | 链路详情 | 串口:端口 + 波特率参数;BLE:GATT 服务树 |
 
@@ -200,7 +201,8 @@ src/ble_chassis_control/
 ├── ui/
 │   ├── theme.py       # sv-ttk 主题 / DPI / 字体 / Palette
 │   ├── layout.py      # 纯控件构建(视图层,不处理业务)
-│   └── chart_window.py# 独立放大的曲线窗口
+│   ├── chart_window.py# 独立放大的曲线窗口
+│   └── settings_window.py # 字体设置窗口
 └── __main__.py        # python -m 入口
 ```
 
@@ -293,7 +295,7 @@ uv run python tools/ble_probe10.py       # 热连接:捕获广播瞬间立即连
 uv run python tools/ble_probe11.py       # GATT 冲刷:8 次短会话密集枚举(排除偶发可用)
 uv run python tools/ble_probe12.py       # 同会话内 4 次反复枚举(排除会话内重试路径)
 uv run python tests/test_smoke.py        # 协议/后端/GUI 冒烟(不连硬件)
-uv run python tests/test_gui_flow.py     # GUI 功能测试:模拟后端 15 条路径(含 SET 缩放/运动中断开/放大曲线)
+uv run python tests/test_gui_flow.py     # GUI 功能测试:模拟后端 16 条路径(含 SET 缩放/运动中断开/放大曲线/字体)
 uv run python tests/test_motion.py       # MotionRunner 测试:θ 累积/世界系定向/定频(10 项)
 uv run python tests/test_wheel_frame.py  # 四轮速度帧:CRC/丢帧/回绕/混流(14 项)
 uv run python tests/test_chart.py        # 曲线图:环形缓冲/量程/绘制(7 项)

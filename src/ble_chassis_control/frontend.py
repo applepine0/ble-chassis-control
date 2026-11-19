@@ -26,7 +26,16 @@ from .backend_serial import SerialBackend, available_ports
 from .link import ChassisLink
 from .motion import MotionRunner
 from .protocol import ParsedMessage, Protocol
-from .ui.theme import Palette, apply_theme, enable_dpi_awareness
+from .ui.theme import (
+    FontSettings,
+    Palette,
+    apply_fonts,
+    apply_theme,
+    enable_dpi_awareness,
+    font_families,
+    load_font_settings,
+    save_font_settings,
+)
 
 if TYPE_CHECKING:
     from concurrent.futures import Future as ConcurrentFuture
@@ -34,6 +43,7 @@ if TYPE_CHECKING:
     from .chart import WheelChart
     from .protocol import LinkStats
     from .ui.chart_window import ChartWindow
+    from .ui.settings_window import FontSettingsWindow
 
 MAX_LOG_LINES = 5000
 
@@ -53,6 +63,7 @@ class App(tk.Tk):
     refresh_btn: ttk.Button
     btn_conn: ttk.Button
     btn_disc: ttk.Button
+    btn_font: ttk.Button
     status_var: tk.StringVar
     status_label: ttk.Label
     port_hint: tk.StringVar
@@ -84,6 +95,8 @@ class App(tk.Tk):
     info_var: tk.StringVar
 
     chart_window: ChartWindow | None
+    settings_window: FontSettingsWindow | None
+    font_settings: FontSettings
     _last_stats: LinkStats | None
     _single_send_hint_shown: bool
 
@@ -91,6 +104,7 @@ class App(tk.Tk):
         enable_dpi_awareness()
         super().__init__()
         self.palette = apply_theme(self, config.UI_THEME)
+        self.font_settings = apply_fonts(self, load_font_settings())
         self.title("底盘上位机 — HC-05 串口 / BLE 透传控制台")
         self.geometry("900x640")
         self.minsize(780, 540)
@@ -114,6 +128,7 @@ class App(tk.Tk):
         self._wheel_hz = 0.0
         self._last_stats = None
         self.chart_window = None  # 独立放大曲线窗口
+        self.settings_window = None  # 字体设置窗口
 
         self._build_ui()
         self.bind("<Escape>", self._on_escape)
@@ -183,6 +198,41 @@ class App(tk.Tk):
 
     def _on_chart_window_closed(self) -> None:
         self.chart_window = None
+
+    def on_font_settings(self) -> None:
+        """打开/聚焦字体设置窗口。"""
+        if self.settings_window is not None:
+            self.settings_window.lift()
+            self.settings_window.focus_force()
+            return
+        from .ui.settings_window import FontSettingsWindow
+
+        self.settings_window = FontSettingsWindow(
+            self,
+            settings=self.font_settings,
+            families=font_families(self),
+            on_apply=self._apply_font_settings,
+            on_close=self._on_font_settings_closed,
+        )
+
+    def _apply_font_settings(self, settings: FontSettings) -> FontSettings:
+        applied = apply_fonts(self, settings)
+        self.font_settings = applied
+        try:
+            save_font_settings(applied)
+        except Exception as exc:
+            self.log_err(f"保存字体设置失败:{exc}")
+        self.chart.redraw()
+        if self.chart_window is not None:
+            self.chart_window.chart.redraw()
+        self.log_sys(
+            f"字体已更新:{applied.ui_family} {applied.ui_size}px / "
+            f"{applied.mono_family} {applied.mono_size}px"
+        )
+        return applied
+
+    def _on_font_settings_closed(self) -> None:
+        self.settings_window = None
 
     def _show_link_stats(self, stats) -> None:
         """链路健康度:丢帧率 / CRC 错误 / 杂散 / 实测帧率。"""
@@ -764,6 +814,12 @@ class App(tk.Tk):
             except Exception:
                 pass
             self.chart_window = None
+        if self.settings_window is not None:
+            try:
+                self.settings_window.close()
+            except Exception:
+                pass
+            self.settings_window = None
         self.destroy()
 
     async def _shutdown_sequence(self) -> None:

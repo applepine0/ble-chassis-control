@@ -461,6 +461,7 @@ WheelChart(master, *,
            redraw_ms=50,                      # 重绘节流(ms)→ 20fps
            height=150,                        # 画布高度(px)
            colors=None, bg=..., grid=..., axis=..., text=...,  # 主题配色
+           font_small=..., font_unit=..., font_legend=...,   # 命名字体
            on_expand=None)                    # “放大”按钮回调(可选)
 ```
 
@@ -470,6 +471,7 @@ WheelChart(master, *,
 chart.push((120.0, -250.0, 0.0, 385.0))   # 推入一帧四轮转速(w0..w3 顺序)
 chart.clear()                              # 清空曲线
 chart.copy_data_from(other)                # 复制另一张曲线的历史数据
+chart.redraw()                             # 字体/配色变化后立即重绘
 chart.maybe_redraw()                       # 由主循环定期调用(内部按 redraw_ms 节流)
 ```
 
@@ -611,6 +613,7 @@ main()           # 模块级入口(console_scripts 指向)
 | `on_stop()` | 急停(按钮或 `Esc`) |
 | `on_send_set()` / `on_send_raw()` | SET / 手动行(按 `config.SET_PARAMS` 自动缩放) |
 | `on_expand_chart()` | 打开/聚焦独立放大的四轮转速曲线窗口 |
+| `on_font_settings()` | 打开字体设置窗口(界面/等宽字体、字号) |
 | `on_self_check()` | 自检(串口列表 / BLE 扫描) |
 | `log_sys/tx/rx/err(text)` | 写日志 |
 
