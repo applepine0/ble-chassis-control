@@ -15,11 +15,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import TYPE_CHECKING
 
-from bleak import BleakClient, BleakGATTCharacteristic, BleakScanner
+from bleak import BleakClient, BleakScanner
 
 from . import config
 from .link import BLEError, ChassisLink, OnLineCallback, OnStateCallback
+
+if TYPE_CHECKING:
+    from bleak.backends.characteristic import BleakGATTCharacteristic
 
 logger = logging.getLogger(__name__)
 
@@ -137,8 +141,9 @@ class BLEBackend(ChassisLink):
         for service in client.services:
             for ch in service.characteristics:
                 chars[ch.uuid.lower()] = ch
-                if ch.short_uuid:
-                    chars.setdefault(ch.short_uuid.lower(), ch)
+                short = _short_uuid(ch.uuid)
+                if short:
+                    chars.setdefault(short, ch)
 
         def lookup(wanted: str) -> BleakGATTCharacteristic | None:
             return chars.get(wanted.lower())
@@ -197,15 +202,17 @@ class BLEBackend(ChassisLink):
     # 发送
     # ------------------------------------------------------------------
     async def send(self, data: bytes) -> None:
-        if not self.is_connected or self._write_char is None:
+        client = self._client
+        write_char = self._write_char
+        if not self.is_connected or client is None or write_char is None:
             raise BLEError("未连接")
         preferred = config.WRITE_WITH_RESPONSE
         if preferred is None:
-            preferred = "write-without-response" not in set(self._write_char.properties)
+            preferred = "write-without-response" not in set(write_char.properties)
         last: Exception | None = None
         for mode in (preferred, not preferred):
             try:
-                await self._client.write_gatt_char(self._write_char, data, response=mode)
+                await client.write_gatt_char(write_char, data, response=mode)
                 self.last_error = ""
                 return
             except Exception as exc:
@@ -258,10 +265,6 @@ class BLEBackend(ChassisLink):
                 await client.disconnect()
             except Exception:
                 pass
-            try:
-                client.close()
-            except Exception:
-                pass
 
     # ------------------------------------------------------------------
     # 工具
@@ -278,6 +281,14 @@ class BLEBackend(ChassisLink):
         if "was not found" in msg:
             return f"设备未找到:请确认模块已上电且处于广播状态({config.SCAN_TIMEOUT}s 内未出现)"
         return f"{name}:{msg}"
+
+
+def _short_uuid(uuid: str) -> str | None:
+    """把 0000xxxx-0000-1000-8000-00805f9b34fb 转成 xxxx。"""
+    u = uuid.lower()
+    if len(u) == 36 and u.startswith("0000") and u.endswith("-0000-1000-8000-00805f9b34fb"):
+        return u[4:8]
+    return None
 
 
 def _service_rank(uuid: str) -> int:

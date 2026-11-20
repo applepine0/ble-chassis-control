@@ -16,9 +16,14 @@ import asyncio
 import logging
 import re
 import threading
+from concurrent.futures import Future
+from typing import TYPE_CHECKING
 
 from . import config
 from .link import ChassisLink, LinkError, OnLineCallback, OnStateCallback
+
+if TYPE_CHECKING:
+    from serial import Serial
 
 logger = logging.getLogger(__name__)
 
@@ -109,10 +114,10 @@ class SerialBackend(ChassisLink):
         super().__init__(on_line=on_line, on_state=on_state, on_wheel=on_wheel, on_stats=on_stats)
         self.port = port or config.SERIAL_PORT
         self.baudrate = int(baudrate or config.SERIAL_BAUDRATE)
-        self._ser: serial.Serial | None = None
+        self._ser: Serial | None = None
         self._reader: threading.Thread | None = None
         self._stop_evt = threading.Event()
-        self._reconnect_task: asyncio.Task | None = None
+        self._reconnect_task: Future[None] | None = None
         self._manual_disconnect = False
         self._loop: asyncio.AbstractEventLoop | None = None
 
@@ -273,7 +278,7 @@ class SerialBackend(ChassisLink):
                 except LinkError as exc:
                     self._emit(f"自动重连失败:{exc}({delay:g} 秒后重试)")
         finally:
-            self._reconnect_task = None  # type: ignore[assignment]
+            self._reconnect_task = None
 
     # ------------------------------------------------------------------
     # 发送
@@ -282,6 +287,8 @@ class SerialBackend(ChassisLink):
         if not self.is_connected:
             raise LinkError("串口未连接")
         ser = self._ser
+        if ser is None:
+            raise LinkError("串口未连接")
         try:
             await asyncio.to_thread(ser.write, data)
             # flush 在蓝牙虚拟串口上可能无限阻塞,单独加超时
