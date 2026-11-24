@@ -281,6 +281,37 @@ def run() -> None:
             fe.save_font_settings = old_save
         print("16) 字体设置窗口/应用: OK")
 
+        # 17) 曲线暂停 / CSV / 主题切换
+        from pathlib import Path
+
+        from ble_chassis_control.ui.theme import FontSettings
+
+        csv_path = Path("tmp_test_chart.csv")
+        try:
+            app.chart.clear()
+            app.chart.push((1.0, 2.0, 3.0, 4.0))
+            app.chart.push((5.0, 6.0, 7.0, 8.0))
+            assert app.chart.export_csv(str(csv_path)) == 2
+            assert "time_s" in csv_path.read_text(encoding="utf-8-sig")
+
+            before = len(app.chart._series[0])
+            assert app.chart.toggle_pause() is True
+            app.chart.push((9.0, 9.0, 9.0, 9.0))
+            assert len(app.chart._series[0]) == before
+            assert app.chart.toggle_pause() is False
+
+            old_save = fe.save_font_settings
+            fe.save_font_settings = lambda _s: None
+            try:
+                app._apply_font_settings(FontSettings(theme="dark"))
+                assert app.palette.name == "dark"
+            finally:
+                app._apply_font_settings(FontSettings(theme="light"))
+                fe.save_font_settings = old_save
+        finally:
+            csv_path.unlink(missing_ok=True)
+        print("17) 曲线暂停/CSV/主题切换: OK")
+
         print("\nGUI 功能测试(模拟链路)全部通过 ✓")
     finally:
         app.on_close()

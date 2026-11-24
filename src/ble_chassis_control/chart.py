@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import csv
 import time
 import tkinter as tk
 from collections import deque
@@ -58,6 +59,7 @@ class WheelChart(ttk.Frame):
         font_unit: str | tuple = ("Consolas", 8),
         font_legend: str | tuple = ("", 11),
         on_expand: Callable[[], None] | None = None,
+        on_export: Callable[[], None] | None = None,
         **kwargs,
     ) -> None:
         super().__init__(master, **kwargs)
@@ -75,11 +77,15 @@ class WheelChart(ttk.Frame):
         self._font_legend = font_legend
 
         self._series: list[deque[float]] = [deque(maxlen=maxlen) for _ in names]
+        self._times: deque[float] = deque(maxlen=maxlen)
         self._last_push = 0.0
         self._dirty = False
         self._last_draw = 0.0
+        self._paused = False
         self._auto_scale = tk.BooleanVar(value=True)
         self._frozen_var = tk.StringVar(value="(无数据)")
+        self._legend_labels: list[tk.Label] = []
+        self._frozen_label: ttk.Label | None = None
 
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
@@ -90,11 +96,17 @@ class WheelChart(ttk.Frame):
         for i, (name, color) in enumerate(zip(names, self.colors, strict=False)):
             # 注意:ttk.Frame 不支持 cget("background")(styled widget),
             # 故图例色块用 tk.Label,背景由父容器继承(不显式设置)。
-            tk.Label(top, text="■", fg=color, font=self._font_legend).grid(
-                row=0, column=i, padx=(0, 1)
-            )
+            label = tk.Label(top, text="■", fg=color, font=self._font_legend)
+            label.grid(row=0, column=i, padx=(0, 1))
+            self._legend_labels.append(label)
             ttk.Label(top, text=name, font=self._font_legend).grid(
                 row=0, column=i + 10, padx=(0, 8)
+            )
+        self._pause_btn = ttk.Button(top, text="暂停", width=6, command=self.toggle_pause)
+        self._pause_btn.grid(row=0, column=27, padx=(6, 0))
+        if on_export is not None:
+            ttk.Button(top, text="导出", width=6, command=on_export).grid(
+                row=0, column=28, padx=(6, 0)
             )
         ttk.Checkbutton(
             top,
@@ -107,9 +119,8 @@ class WheelChart(ttk.Frame):
                 row=0, column=29, padx=(6, 0)
             )
         ttk.Button(top, text="清空", width=6, command=self.clear).grid(row=0, column=31)
-        ttk.Label(top, textvariable=self._frozen_var, foreground=self._axis).grid(
-            row=0, column=32, padx=(8, 0)
-        )
+        self._frozen_label = ttk.Label(top, textvariable=self._frozen_var, foreground=self._axis)
+        self._frozen_label.grid(row=0, column=32, padx=(8, 0))
 
         # 画布
         self.canvas = tk.Canvas(self, height=height, bg=self._bg, highlightthickness=0)
@@ -121,15 +132,19 @@ class WheelChart(ttk.Frame):
     # ------------------------------------------------------------------
     def push(self, speeds) -> None:
         """推入一帧四轮转速(任意长度序列,按 w0..w3 顺序)。"""
+        if self._paused:
+            return
         for i, dq in enumerate(self._series):
             if i < len(speeds):
                 dq.append(float(speeds[i]))
+        self._times.append(time.monotonic())
         self._last_push = time.monotonic()
         self._dirty = True
 
     def clear(self) -> None:
         for dq in self._series:
             dq.clear()
+        self._times.clear()
         self._dirty = True
         self._frozen_var.set("(无数据)")
         self._draw(force=True)
@@ -139,6 +154,8 @@ class WheelChart(ttk.Frame):
         for dst, src in zip(self._series, other._series, strict=False):
             dst.clear()
             dst.extend(src)
+        self._times.clear()
+        self._times.extend(other._times)
         self._last_push = other._last_push
         self._dirty = True
         if any(self._series):
@@ -149,6 +166,52 @@ class WheelChart(ttk.Frame):
         """立即重绘(字体/配色变化后调用)。"""
         self._draw(force=True)
 
+    def toggle_pause(self) -> bool:
+        """暂停/继续接收曲线数据,返回当前是否暂停。"""
+        self._paused = not self._paused
+        self._pause_btn.configure(text="继续" if self._paused else "暂停")
+        self._frozen_var.set("(已暂停)" if self._paused else "")
+        return self._paused
+
+    def apply_palette(
+        self,
+        colors: tuple[str, ...],
+        bg: str,
+        grid: str,
+        axis: str,
+        text: str,
+    ) -> None:
+        """主题切换后更新画布与图例颜色。"""
+        self.colors = tuple(colors)
+        self._bg = bg
+        self._grid = grid
+        self._axis = axis
+        self._text = text
+        self.canvas.configure(bg=bg)
+        for label, color in zip(self._legend_labels, self.colors, strict=False):
+            label.configure(fg=color)
+        if self._frozen_label is not None:
+            self._frozen_label.configure(foreground=axis)
+        self._draw(force=True)
+
+    def export_csv(self, path: str) -> int:
+        """导出当前波形为 CSV,返回写入的数据行数。"""
+        count = min(
+            len(self._times),
+            min((len(dq) for dq in self._series), default=0),
+        )
+        if count <= 0:
+            return 0
+        t0 = self._times[0]
+        with open(path, "w", newline="", encoding="utf-8-sig") as f:
+            writer = csv.writer(f)
+            writer.writerow(["time_s", *self.names])
+            for i in range(count):
+                row = [f"{self._times[i] - t0:.3f}"]
+                row.extend(f"{dq[i]:.3f}" for dq in self._series)
+                writer.writerow(row)
+        return count
+
     # ------------------------------------------------------------------
     # 内部
     # ------------------------------------------------------------------
@@ -157,6 +220,8 @@ class WheelChart(ttk.Frame):
 
     def maybe_redraw(self) -> None:
         """由主循环定期调用;内部按 redraw_ms 节流。"""
+        if self._paused:
+            return
         now = time.monotonic()
         if self._dirty and (now - self._last_draw) * 1000 >= self.redraw_ms:
             self._draw()
@@ -242,4 +307,36 @@ class WheelChart(ttk.Frame):
             fill=self._text,
             text=self.unit,
             font=self._font_unit,
+        )
+
+        # 时间轴(最旧 → 最新)
+        if len(self._times) >= 2:
+            span = max(0.0, self._times[-1] - self._times[0])
+        else:
+            span = 0.0
+        c.create_line(0, h - 1, w, h - 1, fill=self._axis)
+        if span >= 0.05:
+            c.create_text(
+                2,
+                h - 3,
+                anchor="sw",
+                fill=self._text,
+                text=f"-{span:.1f}s",
+                font=self._font_small,
+            )
+            c.create_text(
+                w / 2,
+                h - 3,
+                anchor="s",
+                fill=self._text,
+                text=f"-{span / 2:.1f}s",
+                font=self._font_small,
+            )
+        c.create_text(
+            w - 2,
+            h - 3,
+            anchor="se",
+            fill=self._text,
+            text="0s",
+            font=self._font_small,
         )

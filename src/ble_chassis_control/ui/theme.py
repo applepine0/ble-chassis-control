@@ -10,7 +10,7 @@ import json
 import os
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from tkinter import font
+from tkinter import font, ttk
 from typing import Any
 
 try:  # pragma: no cover - 运行时依赖,pyproject 已声明
@@ -123,6 +123,7 @@ class FontSettings:
     ui_size: int = DEFAULT_UI_SIZE
     mono_family: str = DEFAULT_MONO_FAMILY
     mono_size: int = DEFAULT_MONO_SIZE
+    theme: str = "light"
 
     @property
     def small_size(self) -> int:
@@ -142,6 +143,7 @@ class FontSettings:
             ui_size=min(_FONT_MAX, max(_FONT_MIN, int(self.ui_size))),
             mono_family=(self.mono_family or DEFAULT_MONO_FAMILY).strip(),
             mono_size=min(_FONT_MAX, max(_FONT_MIN, int(self.mono_size))),
+            theme=self.theme if self.theme in PALETTES else "light",
         )
 
 
@@ -153,7 +155,7 @@ def settings_path() -> Path:
     return Path.home() / ".ble-chassis-control" / "ui.json"
 
 
-def load_font_settings(path: Path | None = None) -> FontSettings:
+def load_font_settings(path: Path | None = None, default_theme: str = "light") -> FontSettings:
     target = path or settings_path()
     try:
         data = json.loads(target.read_text(encoding="utf-8"))
@@ -162,9 +164,10 @@ def load_font_settings(path: Path | None = None) -> FontSettings:
             ui_size=int(data.get("ui_size", DEFAULT_UI_SIZE)),
             mono_family=str(data.get("mono_family", DEFAULT_MONO_FAMILY)),
             mono_size=int(data.get("mono_size", DEFAULT_MONO_SIZE)),
+            theme=str(data.get("theme", default_theme)),
         ).clamped()
     except Exception:
-        return FontSettings()
+        return FontSettings(theme=default_theme).clamped()
 
 
 def save_font_settings(settings: FontSettings, path: Path | None = None) -> Path:
@@ -280,7 +283,10 @@ def apply_theme(root: Any, name: str = "dark") -> Palette:
         except Exception:
             pass
     palette = PALETTES[theme]
-    apply_fonts(root, FontSettings())
+    try:
+        ttk.Style(root).configure("Muted.TLabel", foreground=palette.muted)
+    except Exception:
+        pass
     try:
         root.configure(bg=palette.bg)
     except Exception:

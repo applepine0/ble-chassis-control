@@ -32,26 +32,35 @@ def build_main_ui(app) -> None:
 
     # 链路类型:串口(HC-05)/ BLE
     app.link_kind = tk.StringVar(value=config.LINK_KIND)
-    ttk.Radiobutton(
+    app.rb_serial = ttk.Radiobutton(
         top,
         text="串口 (HC-05)",
         value="serial",
         variable=app.link_kind,
         command=app._rebuild_link,
-    ).grid(row=0, column=0, sticky="w")
-    ttk.Radiobutton(
+    )
+    app.rb_serial.grid(row=0, column=0, sticky="w")
+    app.rb_ble = ttk.Radiobutton(
         top,
         text="BLE",
         value="ble",
         variable=app.link_kind,
         command=app._rebuild_link,
-    ).grid(row=0, column=1, sticky="w", padx=(6, 12))
+    )
+    app.rb_ble.grid(row=0, column=1, sticky="w", padx=(6, 12))
 
     app.target_label = ttk.Label(top, text="串口:")
     app.target_label.grid(row=0, column=2, sticky="w")
     app.addr_var = tk.StringVar(value="")
     app.addr_var.trace_add("write", app._remember_target)
-    ttk.Entry(top, textvariable=app.addr_var, width=22).grid(row=0, column=3, sticky="ew", padx=6)
+    app.addr_box = ttk.Combobox(
+        top,
+        textvariable=app.addr_var,
+        width=22,
+        values=[],
+        state="normal",
+    )
+    app.addr_box.grid(row=0, column=3, sticky="ew", padx=6)
     app.refresh_btn = ttk.Button(top, text="刷新口", width=8, command=app._refresh_ports)
     app.refresh_btn.grid(row=0, column=4, padx=2)
     # 波特率下拉(串口模式下可选;必须与模块/MCU 一致)
@@ -72,12 +81,12 @@ def build_main_ui(app) -> None:
     app.btn_font = ttk.Button(top, text="字体", command=app.on_font_settings)
     app.btn_font.grid(row=0, column=9, padx=2)
     app.status_var = tk.StringVar(value="未连接")
-    app.status_label = ttk.Label(top, textvariable=app.status_var, foreground=app.palette.muted)
+    app.status_label = ttk.Label(top, textvariable=app.status_var, style="Muted.TLabel")
     app.status_label.grid(row=0, column=10, sticky="e", padx=6)
 
     # 第二行:串口列表/提示
     app.port_hint = tk.StringVar(value="")
-    ttk.Label(top, textvariable=app.port_hint, foreground=app.palette.muted).grid(
+    ttk.Label(top, textvariable=app.port_hint, style="Muted.TLabel").grid(
         row=1, column=0, columnspan=11, sticky="w", pady=(4, 0)
     )
     app._sync_target_field()
@@ -155,7 +164,7 @@ def build_main_ui(app) -> None:
     ttk.Label(
         ctrl,
         text="(UI 约定:车头坐标系,0°=正前,逆时针为正)",
-        foreground=app.palette.muted,
+        style="Muted.TLabel",
         font=FONT_SMALL,
     ).grid(row=3, column=0, columnspan=3, sticky="w", pady=(2, 0))
 
@@ -194,7 +203,7 @@ def build_main_ui(app) -> None:
         width=6,
     ).grid(row=0, column=1, padx=(4, 10))
     app.motion_state = tk.StringVar(value="未运行")
-    ttk.Label(motion, textvariable=app.motion_state, foreground=app.palette.muted).grid(
+    ttk.Label(motion, textvariable=app.motion_state, style="Muted.TLabel").grid(
         row=0, column=3, sticky="e"
     )
 
@@ -210,7 +219,7 @@ def build_main_ui(app) -> None:
     ttk.Label(
         motion,
         text="启动后按频率持续下发 θ(t)=θ₀−∫ω·dt(默认反向补偿车体自转)",
-        foreground=app.palette.muted,
+        style="Muted.TLabel",
         font=FONT_SMALL,
     ).grid(row=2, column=0, columnspan=4, sticky="w", pady=(4, 0))
 
@@ -232,7 +241,7 @@ def build_main_ui(app) -> None:
     ttk.Label(
         ctrl,
         textvariable=app.set_hint_var,
-        foreground=app.palette.muted,
+        style="Muted.TLabel",
         font=FONT_SMALL,
     ).grid(row=8, column=0, columnspan=3, sticky="w")
     app.set_name.bind("<<ComboboxSelected>>", lambda _e: app._update_set_hint())
@@ -290,6 +299,9 @@ def build_main_ui(app) -> None:
     logbar = ttk.Frame(logf)
     logbar.grid(row=1, column=0, columnspan=2, sticky="ew", pady=4)
     ttk.Checkbutton(logbar, text="自动滚动", variable=app.autoscroll_var).pack(side="left")
+    ttk.Button(logbar, text="日志目录", width=10, command=app.open_log_dir).pack(
+        side="right", padx=(0, 4)
+    )
     ttk.Button(logbar, text="清空日志", width=10, command=app.clear_log).pack(side="right")
 
     # 四轮转速实时曲线
@@ -312,6 +324,7 @@ def build_main_ui(app) -> None:
         font_unit=FONT_CHART,
         font_legend=FONT_LEGEND,
         on_expand=app.on_expand_chart,
+        on_export=app.export_chart_csv,
     )
     app.chart.grid(row=0, column=0, sticky="ew")
 
@@ -328,12 +341,12 @@ def build_main_ui(app) -> None:
     ).grid(row=0, column=0, sticky="w", pady=2)
 
     app.link_health_var = tk.StringVar(value="")
-    ttk.Label(bottom, textvariable=app.link_health_var, foreground=app.palette.muted).grid(
+    ttk.Label(bottom, textvariable=app.link_health_var, style="Muted.TLabel").grid(
         row=1, column=0, sticky="w"
     )
 
     # 链路详情(GATT 树 / 串口参数)
     app.info_var = tk.StringVar(value="(未连接)")
-    ttk.Label(app, textvariable=app.info_var, foreground=app.palette.muted).grid(
+    ttk.Label(app, textvariable=app.info_var, style="Muted.TLabel").grid(
         row=3, column=0, sticky="w", padx=8, pady=4
     )

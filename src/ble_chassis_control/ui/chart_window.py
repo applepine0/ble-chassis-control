@@ -64,6 +64,17 @@ class ChartWindow(tk.Toplevel):
     def copy_data_from(self, other: WheelChart) -> None:
         self.chart.copy_data_from(other)
 
+    def apply_palette(self, palette: Palette) -> None:
+        self.palette = palette
+        self.configure(bg=palette.bg)
+        self.chart.apply_palette(
+            palette.wheel_colors,
+            palette.chart_bg,
+            palette.chart_grid,
+            palette.chart_axis,
+            palette.chart_text,
+        )
+
     # ------------------------------------------------------------------
     # 生命周期
     # ------------------------------------------------------------------

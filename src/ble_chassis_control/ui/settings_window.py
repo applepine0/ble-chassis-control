@@ -6,11 +6,11 @@ import tkinter as tk
 from collections.abc import Callable, Iterable
 from tkinter import ttk
 
-from .theme import DEFAULT_MONO_FAMILY, DEFAULT_UI_FAMILY, FontSettings
+from .theme import DEFAULT_MONO_FAMILY, DEFAULT_UI_FAMILY, FontSettings, Palette
 
 
 class FontSettingsWindow(tk.Toplevel):
-    """调整界面字体与等宽字体,应用后立即刷新控件。"""
+    """调整主题、界面字体与等宽字体,应用后立即刷新控件。"""
 
     def __init__(
         self,
@@ -18,12 +18,16 @@ class FontSettingsWindow(tk.Toplevel):
         *,
         settings: FontSettings,
         families: Iterable[str],
+        palette: Palette,
         on_apply: Callable[[FontSettings], FontSettings | None],
+        on_open_dir: Callable[[], None] | None = None,
         on_close: Callable[[], None] | None = None,
     ) -> None:
         super().__init__(master)
         self._on_apply = on_apply
+        self._on_open_dir = on_open_dir
         self._on_close_cb = on_close
+        self._palette = palette
         self._closed = False
 
         self.title("字体设置")
@@ -44,6 +48,7 @@ class FontSettingsWindow(tk.Toplevel):
         self.ui_size_var = tk.IntVar(value=settings.ui_size)
         self.mono_family_var = tk.StringVar(value=settings.mono_family)
         self.mono_size_var = tk.IntVar(value=settings.mono_size)
+        self.theme_var = tk.StringVar(value=settings.theme)
         self.status_var = tk.StringVar(value="")
 
         self.columnconfigure(0, weight=1)
@@ -81,6 +86,15 @@ class FontSettingsWindow(tk.Toplevel):
             textvariable=self.ui_size_var,
             width=8,
         ).grid(row=1, column=1, sticky="w", padx=(8, 0), pady=2)
+
+        ttk.Label(ui_box, text="主题").grid(row=2, column=0, sticky="w", pady=2)
+        ttk.Combobox(
+            ui_box,
+            textvariable=self.theme_var,
+            values=("light", "dark"),
+            state="readonly",
+            width=10,
+        ).grid(row=2, column=1, sticky="w", padx=(8, 0), pady=2)
 
         mono_box = ttk.LabelFrame(body, text=" 等宽字体(日志 / 曲线) ", padding=8)
         mono_box.grid(row=1, column=0, sticky="ew", pady=(10, 0))
@@ -124,7 +138,14 @@ class FontSettingsWindow(tk.Toplevel):
 
         bar = ttk.Frame(body)
         bar.grid(row=3, column=0, sticky="ew", pady=(12, 0))
-        ttk.Label(bar, textvariable=self.status_var).pack(side="left")
+        self.status_label = ttk.Label(
+            bar, textvariable=self.status_var, foreground=self._palette.muted
+        )
+        self.status_label.pack(side="left")
+        if self._on_open_dir is not None:
+            ttk.Button(bar, text="配置目录", command=self._on_open_dir).pack(
+                side="right", padx=(6, 0)
+            )
         ttk.Button(bar, text="恢复默认", command=self._reset).pack(side="right", padx=(6, 0))
         ttk.Button(bar, text="关闭", command=self.close).pack(side="right", padx=(6, 0))
         ttk.Button(bar, text="应用", command=self._apply).pack(side="right")
@@ -138,12 +159,14 @@ class FontSettingsWindow(tk.Toplevel):
             mono_size = int(self.mono_size_var.get())
         except (tk.TclError, ValueError):
             self.status_var.set("字号必须是整数")
+            self.status_label.configure(foreground=self._palette.err)
             return None
         return FontSettings(
             ui_family=self.ui_family_var.get().strip() or DEFAULT_UI_FAMILY,
             ui_size=ui_size,
             mono_family=self.mono_family_var.get().strip() or DEFAULT_MONO_FAMILY,
             mono_size=mono_size,
+            theme=self.theme_var.get(),
         ).clamped()
 
     def _update_preview(self, settings: FontSettings) -> None:
@@ -159,9 +182,11 @@ class FontSettingsWindow(tk.Toplevel):
         self.ui_size_var.set(applied.ui_size)
         self.mono_family_var.set(applied.mono_family)
         self.mono_size_var.set(applied.mono_size)
+        self.theme_var.set(applied.theme)
         self._update_preview(applied)
+        self.status_label.configure(foreground=self._palette.muted)
         self.status_var.set(
-            f"已应用:{applied.ui_family} {applied.ui_size}px / "
+            f"已应用:{applied.theme} / {applied.ui_family} {applied.ui_size}px / "
             f"{applied.mono_family} {applied.mono_size}px"
         )
 
@@ -171,6 +196,7 @@ class FontSettingsWindow(tk.Toplevel):
         self.ui_size_var.set(defaults.ui_size)
         self.mono_family_var.set(defaults.mono_family)
         self.mono_size_var.set(defaults.mono_size)
+        self.theme_var.set(defaults.theme)
         self._apply()
 
     def close(self) -> None:

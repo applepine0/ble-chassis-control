@@ -57,17 +57,18 @@ uv run python -m ble_chassis_control
 
 | 区域 | 功能 |
 | :--- | :--- |
-| **链路选择** | **串口 (HC-05)** / **BLE** 单选切换,自动重建链路对象 |
-| 目标栏 | 串口模式填 COM 号(留空自动检测)+ **刷新口**;BLE 模式填模块地址 |
+| **链路选择** | **串口 (HC-05)** / **BLE** 单选切换,自动重建链路对象;连接中锁定 |
+| 目标栏 | 串口模式 **COM 下拉选择**(可手输)+ **刷新口**;BLE 模式填模块地址 |
+| 主窗口 | 启动按内容请求尺寸与屏幕大小自适应放大,避免默认尺寸裁切 |
 | 连接/断开/自检 | 串口自检 = 列出可用串口;BLE 自检 = 扫描目标广播信息 |
 | 底盘控制 | 速度 m/s / 方向 deg / 自转 rad/s 三控件、发送一次(单帧)、急停(Esc) |
 | **旋转前进(定频下发)** | **启动运动/停止运动** + 频率设置;按 `θ(t)=θ₀−∫ω·dt` 反向补偿车体自转,使**世界系方向恒定** |
 | SET 命令 | 通用参数下发(整数 + 参数缩放),如 `SET:MAX_SPEED:800` |
 | 手动发送 | 任意透传文本行发送(自动补 `\n`) |
-| 通信日志 | TX/RX 分色显示、带时间戳、自动滚动开关、5000 行上限、可清空 |
+| 通信日志 | TX/RX 分色显示、带时间戳、自动滚动开关、5000 行上限、可清空;滚动文件日志 + 日志目录入口 |
 | **四轮速度反馈** | 解析 11B 二进制帧并显示四轮实测转速(**rpm**,带轮位名) |
-| **四轮转速曲线** | 实时曲线图(纯 tkinter Canvas),四色区分 + 自动量程 + 零线 + **放大独立窗口** |
-| **字体设置** | 界面/等宽字体与字号可调,应用后日志、曲线同步;保存到 `%APPDATA%` |
+| **四轮转速曲线** | 实时曲线 + 自动量程 + 零线 + 时间轴 + 暂停/继续 + CSV 导出 + **放大独立窗口** |
+| **字体/主题设置** | 界面/等宽字体、字号、亮/暗主题;预览、校验、配置目录;保存到 `%APPDATA%` |
 | **链路健康度** | 丢帧数/丢帧率、CRC 错误、杂散字节(seq 推断)、实测帧率 |
 | 链路详情 | 串口:端口 + 波特率参数;BLE:GATT 服务树 |
 
@@ -197,6 +198,7 @@ src/ble_chassis_control/
 ├── link.py            # 链路抽象基类 ChassisLink(统一 BLE 与串口的接口)
 ├── backend.py         # BLE 后端(Bleak):扫描→连接→UUID 自动解析→收发
 ├── backend_serial.py  # 串口后端(pyserial):HC-05/06 / USB-TTL,读线程+自动重连
+├── logging_setup.py   # 滚动文件日志(本地日志目录)
 ├── frontend.py        # 控制器:连接/运动/日志/状态(事件与异步)
 ├── ui/
 │   ├── theme.py       # sv-ttk 主题 / DPI / 字体 / Palette
@@ -295,7 +297,7 @@ uv run python tools/ble_probe10.py       # 热连接:捕获广播瞬间立即连
 uv run python tools/ble_probe11.py       # GATT 冲刷:8 次短会话密集枚举(排除偶发可用)
 uv run python tools/ble_probe12.py       # 同会话内 4 次反复枚举(排除会话内重试路径)
 uv run python tests/test_smoke.py        # 协议/后端/GUI 冒烟(不连硬件)
-uv run python tests/test_gui_flow.py     # GUI 功能测试:模拟后端 16 条路径(含 SET 缩放/运动中断开/放大曲线/字体)
+uv run python tests/test_gui_flow.py     # GUI 功能测试:模拟后端 17 条路径(含 SET/运动/放大/字体/曲线/主题)
 uv run python tests/test_motion.py       # MotionRunner 测试:θ 累积/世界系定向/定频(10 项)
 uv run python tests/test_wheel_frame.py  # 四轮速度帧:CRC/丢帧/回绕/混流(14 项)
 uv run python tests/test_chart.py        # 曲线图:环形缓冲/量程/绘制(7 项)

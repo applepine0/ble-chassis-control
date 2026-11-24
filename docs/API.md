@@ -462,7 +462,8 @@ WheelChart(master, *,
            height=150,                        # 画布高度(px)
            colors=None, bg=..., grid=..., axis=..., text=...,  # 主题配色
            font_small=..., font_unit=..., font_legend=...,   # 命名字体
-           on_expand=None)                    # “放大”按钮回调(可选)
+           on_expand=None,                    # “放大”按钮回调(可选)
+           on_export=None)                    # “导出 CSV”按钮回调(可选)
 ```
 
 ### 6.2 方法
@@ -472,6 +473,9 @@ chart.push((120.0, -250.0, 0.0, 385.0))   # 推入一帧四轮转速(w0..w3 顺�
 chart.clear()                              # 清空曲线
 chart.copy_data_from(other)                # 复制另一张曲线的历史数据
 chart.redraw()                             # 字体/配色变化后立即重绘
+chart.toggle_pause()                       # 暂停/继续接收(返回是否暂停)
+chart.export_csv("wheel.csv")              # 导出时间 + 四轮转速
+chart.apply_palette(colors, bg, grid, axis, text)  # 主题切换
 chart.maybe_redraw()                       # 由主循环定期调用(内部按 redraw_ms 节流)
 ```
 
@@ -613,7 +617,9 @@ main()           # 模块级入口(console_scripts 指向)
 | `on_stop()` | 急停(按钮或 `Esc`) |
 | `on_send_set()` / `on_send_raw()` | SET / 手动行(按 `config.SET_PARAMS` 自动缩放) |
 | `on_expand_chart()` | 打开/聚焦独立放大的四轮转速曲线窗口 |
-| `on_font_settings()` | 打开字体设置窗口(界面/等宽字体、字号) |
+| `on_font_settings()` | 打开字体/主题设置窗口 |
+| `export_chart_csv()` | 选择路径并导出主曲线 CSV |
+| `open_log_dir()` / `open_settings_dir()` | 打开日志/配置目录 |
 | `on_self_check()` | 自检(串口列表 / BLE 扫描) |
 | `log_sys/tx/rx/err(text)` | 写日志 |
 

@@ -12,18 +12,22 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import os
 import queue
 import threading
 import time
 import tkinter as tk
 from collections import deque
-from tkinter import messagebox, ttk
+from pathlib import Path
+from tkinter import filedialog, messagebox, ttk
 from typing import TYPE_CHECKING
 
 from . import config
 from .backend import BLEBackend, BLEError
 from .backend_serial import SerialBackend, available_ports
 from .link import ChassisLink
+from .logging_setup import log_dir, setup_file_logging
 from .motion import MotionRunner
 from .protocol import ParsedMessage, Protocol
 from .ui.theme import (
@@ -35,6 +39,7 @@ from .ui.theme import (
     font_families,
     load_font_settings,
     save_font_settings,
+    settings_path,
 )
 
 if TYPE_CHECKING:
@@ -44,6 +49,8 @@ if TYPE_CHECKING:
     from .protocol import LinkStats
     from .ui.chart_window import ChartWindow
     from .ui.settings_window import FontSettingsWindow
+
+logger = logging.getLogger(__name__)
 
 MAX_LOG_LINES = 5000
 
@@ -56,8 +63,11 @@ class App(tk.Tk):
     # 以下控件由 ui/layout.py 构建并注入,显式声明供 Pylance 使用
     palette: Palette
     link_kind: tk.StringVar
+    rb_serial: ttk.Radiobutton
+    rb_ble: ttk.Radiobutton
     target_label: ttk.Label
     addr_var: tk.StringVar
+    addr_box: ttk.Combobox
     baud_var: tk.StringVar
     baud_box: ttk.Combobox
     refresh_btn: ttk.Button
@@ -97,14 +107,17 @@ class App(tk.Tk):
     chart_window: ChartWindow | None
     settings_window: FontSettingsWindow | None
     font_settings: FontSettings
+    log_path: Path | None
     _last_stats: LinkStats | None
     _single_send_hint_shown: bool
 
     def __init__(self) -> None:
         enable_dpi_awareness()
         super().__init__()
-        self.palette = apply_theme(self, config.UI_THEME)
-        self.font_settings = apply_fonts(self, load_font_settings())
+        self.log_path = setup_file_logging()
+        saved = load_font_settings(default_theme=config.UI_THEME)
+        self.palette = apply_theme(self, saved.theme)
+        self.font_settings = apply_fonts(self, saved)
         self.title("底盘上位机 — HC-05 串口 / BLE 透传控制台")
         self.geometry("900x640")
         self.minsize(780, 540)
@@ -131,6 +144,8 @@ class App(tk.Tk):
         self.settings_window = None  # 字体设置窗口
 
         self._build_ui()
+        self._fit_initial_window()
+        logger.info("应用启动,日志=%s", self.log_path)
         self.bind("<Escape>", self._on_escape)
         self.after(50, self._poll_queues)
         self.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -199,6 +214,27 @@ class App(tk.Tk):
     def _on_chart_window_closed(self) -> None:
         self.chart_window = None
 
+    def export_chart_csv(self) -> None:
+        """把主曲线当前波形导出为 CSV。"""
+        path = filedialog.asksaveasfilename(
+            parent=self,
+            title="导出四轮转速曲线",
+            defaultextension=".csv",
+            initialfile="wheel_speeds.csv",
+            filetypes=(("CSV", "*.csv"), ("所有文件", "*.*")),
+        )
+        if not path:
+            return
+        try:
+            rows = self.chart.export_csv(path)
+        except Exception as exc:
+            self.log_err(f"导出 CSV 失败:{exc}")
+            return
+        if rows:
+            self.log_sys(f"曲线已导出:{path}({rows} 行)")
+        else:
+            self.log_sys("曲线无数据,未导出")
+
     def on_font_settings(self) -> None:
         """打开/聚焦字体设置窗口。"""
         if self.settings_window is not None:
@@ -211,11 +247,30 @@ class App(tk.Tk):
             self,
             settings=self.font_settings,
             families=font_families(self),
+            palette=self.palette,
             on_apply=self._apply_font_settings,
+            on_open_dir=self.open_settings_dir,
             on_close=self._on_font_settings_closed,
         )
 
+    def open_settings_dir(self) -> None:
+        """打开 UI 设置文件所在目录。"""
+        path = settings_path().parent
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            if os.name == "nt":
+                os.startfile(path)  # type: ignore[attr-defined]
+            else:
+                import webbrowser
+
+                webbrowser.open(path.as_uri())
+        except Exception as exc:
+            self.log_err(f"打开配置目录失败:{exc}")
+
     def _apply_font_settings(self, settings: FontSettings) -> FontSettings:
+        if settings.theme != self.palette.name:
+            self.palette = apply_theme(self, settings.theme)
+            self._apply_palette_to_widgets()
         applied = apply_fonts(self, settings)
         self.font_settings = applied
         try:
@@ -230,6 +285,36 @@ class App(tk.Tk):
             f"{applied.mono_family} {applied.mono_size}px"
         )
         return applied
+
+    def _apply_palette_to_widgets(self) -> None:
+        """主题切换后更新非 ttk 控件的颜色。"""
+        palette = self.palette
+        self.configure(bg=palette.bg)
+        self.log.configure(
+            bg=palette.log_bg,
+            fg=palette.text,
+            insertbackground=palette.text,
+        )
+        for tag, color in (
+            ("sys", palette.log_sys),
+            ("tx", palette.log_tx),
+            ("rx", palette.log_rx),
+            ("err", palette.log_err),
+        ):
+            self.log.tag_configure(tag, foreground=color)
+        self.btn_stop.configure(
+            bg=palette.err,
+            activebackground=palette.danger_active,
+        )
+        self.chart.apply_palette(
+            palette.wheel_colors,
+            palette.chart_bg,
+            palette.chart_grid,
+            palette.chart_axis,
+            palette.chart_text,
+        )
+        if self.chart_window is not None:
+            self.chart_window.apply_palette(palette)
 
     def _on_font_settings_closed(self) -> None:
         self.settings_window = None
@@ -296,6 +381,20 @@ class App(tk.Tk):
 
         build_main_ui(self)
 
+    def _fit_initial_window(self) -> None:
+        """按内容请求尺寸和屏幕大小放大主窗口,避免默认 900x640 裁切。"""
+        self.update_idletasks()
+        req_w = self.winfo_reqwidth()
+        req_h = self.winfo_reqheight()
+        screen_w = self.winfo_screenwidth()
+        screen_h = self.winfo_screenheight()
+        width = min(max(1000, req_w + 16), max(900, screen_w - 80))
+        height = min(max(700, req_h + 16), max(600, screen_h - 120))
+        x = max(0, (screen_w - width) // 2)
+        y = max(0, (screen_h - height) // 2)
+        self.geometry(f"{width}x{height}+{x}+{y}")
+        self.minsize(min(960, width), min(640, height))
+
     # ------------------------------------------------------------------
     # 事件处理
     # ------------------------------------------------------------------
@@ -311,6 +410,7 @@ class App(tk.Tk):
         if self.link_kind.get() == "ble":
             self.target_label.configure(text="模块地址:")
             self.addr_var.set(config.DEVICE_ADDRESS)
+            self.addr_box.configure(values=[])
             self.baud_box.grid_remove()
             self.refresh_btn.grid_remove()
             self.port_hint.set("BLE 模式:填模块地址后点[自检]扫描")
@@ -324,18 +424,22 @@ class App(tk.Tk):
     def _refresh_ports(self) -> None:
         """扫描可用串口并提示。"""
         if self.link_kind.get() != "serial":
+            self.addr_box.configure(values=[])
             self.port_hint.set("BLE 模式:填模块地址后点[自检]扫描")
             return
         try:
             ports = available_ports()
         except Exception as exc:
+            self.addr_box.configure(values=[])
             self.port_hint.set(f"串口枚举失败:{exc}")
             return
         if not ports:
+            self.addr_box.configure(values=[])
             self.port_hint.set(
                 "未检测到串口:请确认 USB-TTL 已插好,或 HC-05 已在 Windows 蓝牙中配对"
             )
             return
+        self.addr_box.configure(values=[d for d, _s in ports])
         listing = " | ".join(f"{d}: {s}" for d, s in ports)
         self.port_hint.set(f"可用串口:{listing}")
 
@@ -397,6 +501,7 @@ class App(tk.Tk):
         self.log_sys(f"连接目标:{self.backend.kind} / {self.backend.target or '(自动)'}")
         self.btn_conn.configure(state="disabled")
         self.btn_disc.configure(state="disabled")
+        self._set_link_controls(False)
         self._set_status("连接中 ...", self.palette.warn)
         self._submit(
             self.backend.connect(),
@@ -412,6 +517,7 @@ class App(tk.Tk):
 
     def on_disconnect(self) -> None:
         self._reconnecting = False
+        self._set_link_controls(False)
         if self.motion is not None and self.motion.is_running:
             self.motion.stop()
             self.log_sys("断开前:已终止运动下发,等待 STOP 下发 ...")
@@ -727,9 +833,23 @@ class App(tk.Tk):
     # ------------------------------------------------------------------
     # 状态切换
     # ------------------------------------------------------------------
+    def _set_link_controls(self, enabled: bool) -> None:
+        """连接中/已连接时锁住链路切换与端口编辑,避免状态竞争。"""
+        state = "normal" if enabled else "disabled"
+        for widget in (self.rb_serial, self.rb_ble, self.addr_box, self.refresh_btn):
+            try:
+                widget.configure(state=state)
+            except tk.TclError:
+                pass
+        try:
+            self.baud_box.configure(state="readonly" if enabled else "disabled")
+        except tk.TclError:
+            pass
+
     def _ready_buttons(self) -> None:
         self.btn_conn.configure(state="normal")
         self.btn_disc.configure(state="disabled")
+        self._set_link_controls(True)
 
     def _set_status(self, text: str, color: str | None = None) -> None:
         """更新状态栏文字与颜色。"""
@@ -751,6 +871,7 @@ class App(tk.Tk):
             self._set_status(f"已连接 ({self.backend.target})", self.palette.ok)
         self.btn_conn.configure(state="disabled")
         self.btn_disc.configure(state="normal")
+        self._set_link_controls(False)
         self.info_var.set(self.backend.detail_text or "(无链路详情)")
 
     def _set_disconnected(self) -> None:
@@ -758,12 +879,19 @@ class App(tk.Tk):
         self._set_status("未连接", self.palette.muted)
         self.btn_conn.configure(state="normal")
         self.btn_disc.configure(state="disabled")
+        self._set_link_controls(True)
         self.info_var.set("(未连接)")
 
     # ------------------------------------------------------------------
     # 日志
     # ------------------------------------------------------------------
     def _log(self, tag: str, text: str) -> None:
+        if tag == "err":
+            logger.error("%s", text)
+        elif tag == "sys":
+            logger.info("%s", text)
+        else:
+            logger.debug("%s: %s", tag, text)
         self.log.configure(state="normal")
         self.log.insert(tk.END, f"[{now()}] ", "sys")
         self.log.insert(tk.END, text + "\n", tag)
@@ -791,6 +919,20 @@ class App(tk.Tk):
         self.log.configure(state="normal")
         self.log.delete("1.0", tk.END)
         self.log.configure(state="disabled")
+
+    def open_log_dir(self) -> None:
+        """打开本地日志目录。"""
+        path = log_dir()
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            if os.name == "nt":
+                os.startfile(path)  # type: ignore[attr-defined]
+            else:
+                import webbrowser
+
+                webbrowser.open(path.as_uri())
+        except Exception as exc:
+            self.log_err(f"打开日志目录失败:{exc}")
 
     # ------------------------------------------------------------------
     # 关闭
