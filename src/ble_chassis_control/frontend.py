@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING
 from . import config
 from .backend import BLEBackend, BLEError
 from .backend_serial import SerialBackend, available_ports
+from .chart import WheelData
 from .link import ChassisLink
 from .logging_setup import log_dir, setup_file_logging
 from .motion import MotionRunner
@@ -99,6 +100,7 @@ class App(tk.Tk):
     log: tk.Text
     autoscroll_var: tk.BooleanVar
     chart: WheelChart
+    wheel_data: WheelData
 
     wheel_var: tk.StringVar
     link_health_var: tk.StringVar
@@ -142,6 +144,10 @@ class App(tk.Tk):
         self._last_stats = None
         self.chart_window = None  # 独立放大曲线窗口
         self.settings_window = None  # 字体设置窗口
+        self.wheel_data = WheelData(
+            maxlen=config.CHART_MAXLEN,
+            channels=len(config.WHEEL_NAMES),
+        )
 
         self._build_ui()
         self._fit_initial_window()
@@ -188,10 +194,8 @@ class App(tk.Tk):
         if len(self._frame_times) >= 2:
             span = self._frame_times[-1] - self._frame_times[0]
             self._wheel_hz = (len(self._frame_times) - 1) / span if span > 0 else 0.0
-        # 推入曲线(高频调用,内部有节流重绘)
-        self.chart.push(frame.speeds)
-        if self.chart_window is not None:
-            self.chart_window.push(frame.speeds)
+        # 推入共享曲线数据源(主图/放大图同源)
+        self.wheel_data.push(frame.speeds)
 
     def on_expand_chart(self) -> None:
         """打开/聚焦独立放大的四轮转速曲线窗口。"""
@@ -201,14 +205,13 @@ class App(tk.Tk):
             return
         from .ui.chart_window import ChartWindow
 
-        self.chart_window = win = ChartWindow(
+        self.chart_window = ChartWindow(
             self,
             palette=self.palette,
+            data=self.wheel_data,
             on_close=self._on_chart_window_closed,
-            maxlen=max(config.CHART_MAXLEN, 1200),
             height=520,
         )
-        win.copy_data_from(self.chart)
         self.log_sys("曲线已放大为独立窗口")
 
     def _on_chart_window_closed(self) -> None:

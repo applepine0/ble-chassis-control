@@ -313,6 +313,7 @@ def build_main_ui(app) -> None:
         names=config.WHEEL_NAMES,
         unit=config.WHEEL_SPEED_UNIT,
         maxlen=config.CHART_MAXLEN,
+        data=app.wheel_data,
         redraw_ms=config.CHART_REDRAW_MS,
         height=config.CHART_HEIGHT,
         colors=app.palette.wheel_colors,

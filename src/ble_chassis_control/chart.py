@@ -30,6 +30,41 @@ C_AXIS = "#6A6A6A"
 C_TEXT = "#CCCCCC"
 
 
+class WheelData:
+    """主图与放大图共享的曲线数据源。"""
+
+    def __init__(self, maxlen: int = 600, channels: int = 4) -> None:
+        self.maxlen = maxlen
+        self.series: list[deque[float]] = [deque(maxlen=maxlen) for _ in range(channels)]
+        self.times: deque[float] = deque(maxlen=maxlen)
+        self.last_push = 0.0
+        self.revision = 0
+
+    def push(self, speeds) -> None:
+        for i, dq in enumerate(self.series):
+            if i < len(speeds):
+                dq.append(float(speeds[i]))
+        self.times.append(time.monotonic())
+        self.last_push = time.monotonic()
+        self.revision += 1
+
+    def clear(self) -> None:
+        for dq in self.series:
+            dq.clear()
+        self.times.clear()
+        self.last_push = 0.0
+        self.revision += 1
+
+    def copy_from(self, other: WheelData) -> None:
+        for dst, src in zip(self.series, other.series, strict=False):
+            dst.clear()
+            dst.extend(src)
+        self.times.clear()
+        self.times.extend(other.times)
+        self.last_push = other.last_push
+        self.revision += 1
+
+
 class WheelChart(ttk.Frame):
     """四轮转速曲线控件。
 
@@ -50,6 +85,7 @@ class WheelChart(ttk.Frame):
         maxlen: int = 600,  # 保留最近 N 个采样(600 @100Hz = 6 秒)
         redraw_ms: int = 50,  # 重绘节流
         height: int = 150,
+        data: WheelData | None = None,
         colors: tuple[str, ...] | None = None,
         bg: str = C_BG,
         grid: str = C_GRID,
@@ -67,6 +103,8 @@ class WheelChart(ttk.Frame):
         self.unit = unit
         self.maxlen = maxlen
         self.redraw_ms = redraw_ms
+        self.data = data or WheelData(maxlen, len(names))
+        self.maxlen = self.data.maxlen
         self.colors = tuple(colors or WHEEL_COLORS)
         self._bg = bg
         self._grid = grid
@@ -76,10 +114,8 @@ class WheelChart(ttk.Frame):
         self._font_unit = font_unit
         self._font_legend = font_legend
 
-        self._series: list[deque[float]] = [deque(maxlen=maxlen) for _ in names]
-        self._times: deque[float] = deque(maxlen=maxlen)
-        self._last_push = 0.0
-        self._dirty = False
+        self._last_rev = self.data.revision
+        self._dirty = True
         self._last_draw = 0.0
         self._paused = False
         self._auto_scale = tk.BooleanVar(value=True)
@@ -130,33 +166,29 @@ class WheelChart(ttk.Frame):
     # ------------------------------------------------------------------
     # 数据接口
     # ------------------------------------------------------------------
+    @property
+    def _series(self) -> list[deque[float]]:
+        return self.data.series
+
+    @property
+    def _times(self) -> deque[float]:
+        return self.data.times
+
     def push(self, speeds) -> None:
-        """推入一帧四轮转速(任意长度序列,按 w0..w3 顺序)。"""
-        if self._paused:
-            return
-        for i, dq in enumerate(self._series):
-            if i < len(speeds):
-                dq.append(float(speeds[i]))
-        self._times.append(time.monotonic())
-        self._last_push = time.monotonic()
-        self._dirty = True
+        """推入一帧四轮转速(共享数据源;暂停只冻结当前视图)。"""
+        self.data.push(speeds)
 
     def clear(self) -> None:
-        for dq in self._series:
-            dq.clear()
-        self._times.clear()
+        self.data.clear()
         self._dirty = True
         self._frozen_var.set("(无数据)")
         self._draw(force=True)
 
     def copy_data_from(self, other: WheelChart) -> None:
-        """复制另一张曲线的数据(用于打开放大窗口时继承已有波形)。"""
-        for dst, src in zip(self._series, other._series, strict=False):
-            dst.clear()
-            dst.extend(src)
-        self._times.clear()
-        self._times.extend(other._times)
-        self._last_push = other._last_push
+        """复制另一张曲线的数据(仅独立数据源时使用)。"""
+        if self.data is other.data:
+            return
+        self.data.copy_from(other.data)
         self._dirty = True
         if any(self._series):
             self._frozen_var.set("")
@@ -167,7 +199,7 @@ class WheelChart(ttk.Frame):
         self._draw(force=True)
 
     def toggle_pause(self) -> bool:
-        """暂停/继续接收曲线数据,返回当前是否暂停。"""
+        """暂停/继续当前视图重绘,返回是否暂停。"""
         self._paused = not self._paused
         self._pause_btn.configure(text="继续" if self._paused else "暂停")
         self._frozen_var.set("(已暂停)" if self._paused else "")
@@ -223,12 +255,15 @@ class WheelChart(ttk.Frame):
         if self._paused:
             return
         now = time.monotonic()
+        if self.data.revision != self._last_rev:
+            self._last_rev = self.data.revision
+            self._dirty = True
         if self._dirty and (now - self._last_draw) * 1000 >= self.redraw_ms:
             self._draw()
         # 无数据提示(2 秒无新帧)
-        if self._last_push and now - self._last_push > 2.0:
+        if self.data.last_push and now - self.data.last_push > 2.0:
             self._frozen_var.set("(无数据)")
-        elif self._last_push:
+        elif self.data.last_push:
             self._frozen_var.set("")
 
     def _draw(self, force: bool = False) -> None:
@@ -239,6 +274,7 @@ class WheelChart(ttk.Frame):
             return
         self._dirty = False
         self._last_draw = time.monotonic()
+        self._last_rev = self.data.revision
         c.delete("all")
 
         # 计算量程

@@ -1,6 +1,6 @@
 """独立放大的四轮转速曲线窗口。
 
-只负责"大图"视图:数据由 App 推送,配色由 theme.Palette 注入。
+与主图共享 ``WheelData``;本窗口只负责视图和重绘节奏。
 """
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ import tkinter as tk
 from collections.abc import Callable
 
 from .. import config
-from ..chart import WheelChart
+from ..chart import WheelChart, WheelData
 from .theme import FONT_CHART, FONT_CHART_SMALL, FONT_LEGEND, Palette
 
 
@@ -19,8 +19,8 @@ class ChartWindow(tk.Toplevel):
         master,
         *,
         palette: Palette,
+        data: WheelData,
         on_close: Callable[[], None] | None = None,
-        maxlen: int = 1200,
         height: int = 520,
     ) -> None:
         super().__init__(master)
@@ -38,7 +38,7 @@ class ChartWindow(tk.Toplevel):
             self,
             names=config.WHEEL_NAMES,
             unit=config.WHEEL_SPEED_UNIT,
-            maxlen=maxlen,
+            data=data,
             redraw_ms=config.CHART_REDRAW_MS,
             height=height,
             colors=palette.wheel_colors,
@@ -60,9 +60,6 @@ class ChartWindow(tk.Toplevel):
     # ------------------------------------------------------------------
     def push(self, speeds) -> None:
         self.chart.push(speeds)
-
-    def copy_data_from(self, other: WheelChart) -> None:
-        self.chart.copy_data_from(other)
 
     def apply_palette(self, palette: Palette) -> None:
         self.palette = palette

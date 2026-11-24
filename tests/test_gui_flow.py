@@ -294,10 +294,11 @@ def run() -> None:
             assert app.chart.export_csv(str(csv_path)) == 2
             assert "time_s" in csv_path.read_text(encoding="utf-8-sig")
 
-            before = len(app.chart._series[0])
+            before = app.chart.data.revision
             assert app.chart.toggle_pause() is True
             app.chart.push((9.0, 9.0, 9.0, 9.0))
-            assert len(app.chart._series[0]) == before
+            # 暂停只冻结当前视图,共享数据源继续更新
+            assert app.chart.data.revision == before + 1
             assert app.chart.toggle_pause() is False
 
             old_save = fe.save_font_settings

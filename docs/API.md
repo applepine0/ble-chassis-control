@@ -460,6 +460,7 @@ WheelChart(master, *,
            maxlen=600,                        # 环形缓冲容量(采样点数)
            redraw_ms=50,                      # 重绘节流(ms)→ 20fps
            height=150,                        # 画布高度(px)
+           data=None,                         # 共享 WheelData(主图/放大图同源)
            colors=None, bg=..., grid=..., axis=..., text=...,  # 主题配色
            font_small=..., font_unit=..., font_legend=...,   # 命名字体
            on_expand=None,                    # “放大”按钮回调(可选)
@@ -473,9 +474,24 @@ chart.push((120.0, -250.0, 0.0, 385.0))   # 推入一帧四轮转速(w0..w3 顺�
 chart.clear()                              # 清空曲线
 chart.copy_data_from(other)                # 复制另一张曲线的历史数据
 chart.redraw()                             # 字体/配色变化后立即重绘
-chart.toggle_pause()                       # 暂停/继续接收(返回是否暂停)
+chart.toggle_pause()                       # 暂停/继续当前视图(共享数据仍更新)
 chart.export_csv("wheel.csv")              # 导出时间 + 四轮转速
 chart.apply_palette(colors, bg, grid, axis, text)  # 主题切换
+```
+
+### 6.3 共享数据源
+
+```python
+from ble_chassis_control.chart import WheelChart, WheelData
+
+data = WheelData(maxlen=600, channels=4)
+main = WheelChart(parent, data=data)
+large = WheelChart(toplevel, data=data)   # 同一份波形,不需要 copy
+data.push((120.0, -250.0, 0.0, 385.0))    # 两个视图同时看到
+```
+
+`WheelChart.push()` 也会写入共享数据；暂停只冻结当前视图的重绘，
+不影响另一张图或数据源。
 chart.maybe_redraw()                       # 由主循环定期调用(内部按 redraw_ms 节流)
 ```
 
