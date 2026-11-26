@@ -9,5 +9,8 @@ wheels/
 # Virtual environments
 .venv
 
+# Editor/workspace settings (machine-specific)
+.vscode/
+
 # uv temp cache (WSL)
 .uvcache/

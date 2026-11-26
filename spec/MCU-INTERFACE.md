@@ -1,6 +1,6 @@
 # 底盘 MCU 接口文档
 
-> 面向**底盘固件开发者**(嵌入式同事)。PC 上位机实现见 [README](../README.md) 与 [API](API.md)。
+> 面向**底盘固件开发者**。PC 上位机实现见 [README](../README.md) 与 [API](API.md)。
 >
 > 版本:2026-10-25  
 > 协议:文本行 `VEL / STOP / SET / TEL / ERR` + 11B 二进制轮速帧  
@@ -453,6 +453,5 @@ static void send_wheel_frame(const int16_t rpm[4])
 
 ## 十二、相关文档
 
-- [README](../README.md):快速上手、PC 侧协议速查、硬件诊断
+- [README](../README.md):项目介绍、架构、当前状态
 - [API](API.md):PC 侧完整接口与线格式
-- [DEVELOPMENT](DEVELOPMENT.md):设计决策、踩坑史、线程模型

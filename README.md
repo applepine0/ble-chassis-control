@@ -1,316 +1,168 @@
 # ble-chassis-control
 
-底盘上位机:支持 **HC-05 串口(经典蓝牙 SPP)** 与 **BLE** 双链路,实现控制指令下发与数据回传显示。
+> Windows 底盘上位机：通过 HC-05 经典蓝牙串口或 BLE 透传连接底盘 MCU，下发速度矢量与辅助执行器指令，接收四轮转速与状态反馈。
+> 状态：开发/联调中。
 
-- 技术栈:Python 3.13 + tkinter/ttk + **sv-ttk 主题**;串口用 pyserial、BLE 用 Bleak;uv 管理,src layout
-- 硬件:HC-05(经典蓝牙,**推荐**)/ BLE 模块 + USB-TTL,电脑自带蓝牙
+## 1. 这是什么
 
----
+- 串口主链路：HC-05/06 经典蓝牙 SPP 虚拟 COM 口，默认 `115200 8N1`；
+- BLE 备选链路：透传特征 FFE1（write + notify），兼容 NUS；
+- 控制：`VEL` 速度矢量、`STOP` 底盘急停、`SET` 参数、`LIFT/AUX/CYL` 辅助执行器；
+- 反馈：文本 `TEL` + 11 字节四轮转速二进制帧；
+- 界面：tkinter + ttk + sv-ttk，亮/暗主题，可调字体，四轮实时曲线；
+- 不包含：MCU 固件、运动学逆解、CAN/电机驱动。
 
-## ⚡ 快速开始(Windows)
-
-```powershell
-uv sync                        # 安装依赖(bleak + pyserial + sv-ttk + dev ruff)
-uv run ble-chassis-control     # 启动 GUI
-# 或
-uv run python -m ble_chassis_control
-```
-
-### 首次使用 HC-05(推荐路线)
-
-1. **Windows 配对**:设置 → 蓝牙和其他设备 → 添加设备 → 蓝牙 → 选 **HC-05** → PIN `1234` 或 `0000`;
-2. 配对后:设备管理器 → **端口(COM 和 LPT)** 会出现"标准串行 over 蓝牙链接 (**COMx**)"标记;
-3. 启动 GUI → 确保选中 **串口 (HC-05)** → 填 COM 号(留空自动检测)→ 点 **连接**;
-4. 用速度滑块控制底盘;命令行验证可用 `verify_serial.py`。
-
-> ⚠️ **串口独占**:连接时请关闭 VOFA+ / 串口助手 / Arduino IDE 等占用同一 COM 口的程序,否则报"串口被占用"。
-
-### ⚠️ 串口写入超时(Write timeout)
-
-日志出现 `!! 串口写入失败:Write timeout` 表示 **Windows 在 2 秒内没能把指令交给蓝牙串口**,
-不是 `VEL` 编码/缩放问题。常见原因:
-
-- HC-05 已掉线,但 COM 口还开着(**假连接**);
-- 模块 UART 缓冲满:MCU 没在取数(未供电、TX/RX 接反、未共地、波特率不一致),
-  或模块还停在 AT 模式;
-- 蓝牙适配器/USB 省电、驱动卡死。
-
-处理顺序:
-
-1. 看模块灯:HC-06 常亮=已连接、闪烁=未连接;HC-05 快闪=未连接、慢闪=AT 模式、
-   双闪=已连接(不同批次以手册为准);
-2. **确认 COM 口**:系统里有多个蓝牙 SPP 口时,选**带真实设备地址**的那个;
-   重新配对/重启后 COM 号可能变(如 COM15→COM9),旧号会作为“地址空”的幽灵口
-   残留在列表里;以“刷新口”列表为准,程序会自动优先选带真实地址的口;
-3. GUI **断开 → 重新连接**;不行就 HC-05 断电 5 秒、重新上电/配对;
-4. 查 MCU 供电、模块 TX/RX 是否交叉、GND、两端是否都 **115200**;
-5. 关闭 VOFA+/串口助手;设备管理器 → 蓝牙适配器 **禁用再启用**;
-6. 仍失败,用 `uv run python tools/verify_serial.py COMx 115200 --listen 5` 判断
-   是"只写失败"还是"双向都不通"。
-
-> 程序检测到写超时会**主动关闭串口并按 `RECONNECT_DELAY` 自动重连**,不再保持假连接。
-> 连接时还会先写一条 `STOP` 做**链路探测**:写不出去就直接判连接失败,
-> 不会在模块未上电时显示“已连接”。
-> 若日志持续刷写超时,说明模块/MCU 侧仍未恢复,按上面 1~6 查。
-
-## 界面功能
-
-| 区域 | 功能 |
-| :--- | :--- |
-| **链路选择** | **串口 (HC-05)** / **BLE** 单选切换,自动重建链路对象;连接中锁定 |
-| 目标栏 | 串口模式 **COM 下拉选择**(可手输)+ **刷新口**;BLE 模式填模块地址 |
-| 主窗口 | 启动按内容请求尺寸与屏幕大小自适应放大,避免默认尺寸裁切 |
-| 连接/断开/自检 | 串口自检 = 列出可用串口;BLE 自检 = 扫描目标广播信息 |
-| 底盘控制 | 速度 m/s / 方向 deg / 自转 rad/s 三控件、发送一次(单帧)、急停(Esc) |
-| **旋转前进(定频下发)** | **启动运动/停止运动** + 频率设置;按 `θ(t)=θ₀−∫ω·dt` 反向补偿车体自转,使**世界系方向恒定** |
-| SET 命令 | 通用参数下发(整数 + 参数缩放),如 `SET:MAX_SPEED:800` |
-| 手动发送 | 任意透传文本行发送(自动补 `\n`) |
-| 通信日志 | TX/RX 分色显示、带时间戳、自动滚动开关、5000 行上限、可清空;滚动文件日志 + 日志目录入口 |
-| **四轮速度反馈** | 解析 11B 二进制帧并显示四轮实测转速(**rpm**,带轮位名) |
-| **四轮转速曲线** | 实时曲线 + 自动量程 + 零线 + 时间轴 + 暂停/继续 + CSV 导出 + **放大独立窗口(与主图同源)** |
-| **字体/主题设置** | 界面/等宽字体、字号、亮/暗主题;预览、校验、配置目录;保存到 `%APPDATA%` |
-| **辅助执行器** | 升降高度 0~500 mm、辅助轮1 绝对角 0~360°、气缸1 伸/缩;三个模块独立启停 |
-| **链路健康度** | 丢帧数/丢帧率、CRC 错误、杂散字节(seq 推断)、实测帧率 |
-| 链路详情 | 串口:端口 + 波特率参数;BLE:GATT 服务树 |
-
-## 通信协议(文本行 + 定点整数,以 `\n` 结尾)
-
-透传链路上字节透明转发,协议走文本行便于调试;**串口与 BLE 共用同一协议**,MCU 端只需实现一次。
-
-### 主指令:速度矢量(底盘类型无关)
+## 2. 架构
 
 ```text
-VEL:<v_mmps>,<deg_tenths>,<omega_mradps>
+tkinter GUI (frontend.py + ui/)
+        │ 事件 / 状态 / 日志
+        ▼
+ChassisLink 抽象 (link.py)
+        ├── SerialBackend (backend_serial.py)  HC-05 SPP
+        └── BLEBackend    (backend.py)         BLE 透传
+        │
+        ▼
+Protocol / StreamDemux (protocol.py)
+        ├── 文本行：VEL / STOP / SET / LIFT / AUX / CYL / TEL
+        └── 二进制：0xAA + seq + 4×int16 + CRC8
 ```
 
-| 字段 | 物理含义 | 线上单位 | 换算示例 |
-| :--- | :--- | :--- | :--- |
-| `v_mmps` | 速度**大小**(标量,非负) | mm/s 整数 | 0.5 m/s → `500` |
-| `deg_tenths` | 运动**方向角** | 0.1° 整数 | 90.0° → `900` |
-| `omega_mradps` | **自转角速度** | mrad/s 整数 | 1.570 rad/s → `1570` |
+### 2.1 模块职责
 
-| 示例 | 含义 |
+| 路径 | 职责 |
 | :--- | :--- |
-| `VEL:500,900,0` | 0.5 m/s,朝 90.0°,不转 |
-| `VEL:0,0,1570` | 原地以 1.570 rad/s 自转 |
-| `VEL:800,450,-500` | 0.8 m/s 朝 45.0°,同时 -0.5 rad/s 自转 |
-| `STOP` | 急停(三量归零,短帧优先) |
-| `SET:<参数名>:<整数>` | 通用参数,按参数缩放,如 `SET:MAX_SPEED:800` |
+| `config.py` | 链路、串口、UUID、超时、协议范围、UI 参数 |
+| `protocol.py` | 文本编解码、11B 帧、CRC8、流式解复用 |
+| `motion.py` | θ 时间积分与定频下发 |
+| `link.py` | `ChassisLink` 抽象：连接/发送/回调/统计 |
+| `backend_serial.py` | 串口后端：读线程、写超时、自动重连 |
+| `backend.py` | BLE 后端：扫描、GATT 解析、通知 |
+| `chart.py` | 四轮曲线与共享 `WheelData` |
+| `frontend.py` | 控制器：事件、异步、状态机 |
+| `ui/` | 主题、布局、曲线窗口、字体设置、辅助执行器面板 |
+| `logging_setup.py` | 滚动文件日志 |
 
-**SET 参数缩放(方案 A:线上整数)**
+### 2.2 线程模型
 
-| 参数 | 物理单位 | 缩放 | 示例 |
-| :--- | :--- | ---: | :--- |
-| `MAX_SPEED` | m/s | ×1000 | 0.8 m/s → `SET:MAX_SPEED:800` |
-| `MAX_OMEGA` | rad/s | ×1000 | 1.57 rad/s → `SET:MAX_OMEGA:1570` |
-| 未登记参数 | — | ×1 | `SET:FOO:3` |
+- Tk 主线程负责界面；
+- asyncio 事件循环在后台守护线程；
+- 串口读线程阻塞读，收到数据经队列回传；
+- 后台回调通过 `queue.Queue` 回到 GUI 线程，由 `after(50)` 消费。
 
-> GUI 会显示参数单位与缩放并自动取整;MCU 端按同一张表除以 `scale` 还原物理量。
-> 扩展参数只需改 `config.SET_PARAMS`,协议无需变更。
+### 2.3 协议摘要
 
-**设计要点**
+完整线格式见 [spec/API.md](spec/API.md)；MCU 实现要求见 [spec/MCU-INTERFACE.md](spec/MCU-INTERFACE.md)。
 
-- **全整数定点**:VEL 与 SET 的线上值均为整数;MCU 端零浮点解析(`atoi`/手写整数),无浮点库依赖;
-- **精度**:1 mm/s、0.1°、0.001 rad/s;
-- **协议中立**:不涉及参考系(车头/世界)、正方向、底盘类型(舵轮/麦轮/差速)——
-  这些属于 **MCU 侧运动学语义**,由 MCU 做逆解,上位机只表达"意图";
-- **UI 约定**(不进协议):方向按车头坐标系、0°=正前、逆时针为正;
-- **带宽**:`VEL:500,900,0\n` ≈ 15 字节 → @9600 约 64 条/s;**@115200(当前)约 768 条/s**,20~100Hz 控制无压力。
+```text
+PC → MCU:
+  VEL:<v_mmps>,<deg_tenths>,<omega_mradps>\n
+  STOP\n
+  SET:<名>:<整数>\n
+  LIFT:<0..500>\n
+  AUX:1:<0..3600>\n
+  CYL:1:<0|1>\n
 
-### 兼容保留(旧差速接口)
-
-| 指令 | 格式 | 说明 |
-| :--- | :--- | :--- |
-| 差速速度 | `MOT:<左>,<右>\n` | 百分比,范围 [-100,100] |
-
-### 回传(MCU → PC)
-
-| 指令 | 格式 | 说明 |
-| :--- | :--- | :--- |
-| 遥测 | `TEL:<键>:<值>[,<键>:<值>...]\n` | 如 `TEL:BAT:7.4,SPD_L:12.3`,界面结构化显示 |
-| 其他 | 任意文本行 | 原样显示在日志 |
-
-### ★ 四轮速度反馈(二进制定长帧,11 字节)
-
-```
-[0]=0xAA  [1]=seq  [2:10]=4×int16 小端(转速)  [10]=crc8(0x07)
+MCU → PC:
+  TEL:<键>:<值>[,<键>:<值>...]\n
+  0xAA + seq + 4×int16(LE rpm) + CRC8    # 11B 四轮帧
 ```
 
-**轮序约定**(俯视,车头朝上,逆时针递增):
-`w0=右前` → `w1=左前` → `w2=左后` → `w3=右后`
+关键语义：
 
-- **seq**:序号循环,上位机据此统计**丢帧率**(蓝牙字节流无消息边界,丢帧只能靠序号发现);
-- **crc8**:CRC-8/ATM(多项式 0x07),拒绝误码帧;
-- **单位 rpm**(缩放 1,即线上值就是 rpm 整数;见 `config.WHEEL_SPEED_SCALE`);
-- 与文本行**可混用**:接收侧由 `StreamDemux` 统一解复用(帧优先),帧内 `0x0A` 不再污染文本行;
-- 带宽:@115200 下 100Hz 仅占 9.5%。
+- `VEL` 是锁存设定值，MCU 持续执行到新 `VEL` 或 `STOP`；
+- `STOP` 只停旧底盘驱动，不改变 `LIFT/AUX/CYL`；
+- `LIFT` 相对标定零点，1 mm 分辨率；
+- `AUX` 绝对角，0.1° 占位；
+- 气缸只有伸/缩，不报中间过程。
 
-```python
-link = SerialBackend("COM15", 115200,
-                     on_wheel=lambda f: print(f.speeds),      # 四轮速度帧
-                     on_stats=lambda s: print(s.loss_rate))   # 丢帧率
-```
+## 3. 装配与接线
 
-编码默认 utf-8;协议定义集中在 `src/ble_chassis_control/protocol.py`。
+| 项 | 说明 |
+| :--- | :--- |
+| 主链路 | HC-05/06 配对后生成虚拟 COM 口；模块与 MCU 均 `115200` |
+| 串口独占 | 连接时关闭 VOFA+、串口助手、Arduino IDE 等占用程序 |
+| BLE 模块 | 广播 FFE0，透传 FFE1（write + notify）；备选 NUS |
+| 供电/电平 | 模块与 MCU 共地，TX/RX 交叉，电平匹配 |
+| 安全 | `STOP` 只停底盘；升降/辅助轮/气缸由各自控制，整机急停未实现 |
 
-### ⚠️ MCU 端实现要点
+已知硬件限制：本机 JDY-23（V81-02）与 Windows 的配对/GATT 枚举不兼容，BLE 代码保留，实际优先串口。
 
-- 必须用**半角** `:` 和 `,` —— 全角会导致解析失败;
-- 每条指令以 `\n` 结尾作为分帧依据;
-- 收到 `VEL:` 后:**除以缩放系数还原物理量**
-  (`v/1000.0` m/s、`deg/10.0`、`omega/1000.0` rad/s),再做舵轮逆解;
-- `SET:` 的值是**整数**,按参数缩放(如 `MAX_SPEED` ×1000);固件解析后除以
-  `scale` 还原物理量(`0.8 m/s → 800`);
-- 波特率与模块/MCU 一致(**当前 115200**;HC-06 默认 9600,可用 `AT+BAUD8` 改);
-- `v` 为标量大小,负值非法(上位机已钳为 0)。
-
-> 完整的 MCU 侧接线、解析、看门狗与验收用例见
-> **[`docs/MCU-INTERFACE.md`](docs/MCU-INTERFACE.md)**。
-
-## 文档导航
-
-| 文档 | 内容 | 适合谁看 |
-| :--- | :--- | :--- |
-| **本文(README)** | 快速上手、协议、硬件诊断结论 | 所有人 |
-| **[`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)** | **开发交接**:当前状态/待办、设计决策与原因、踩坑史、线程模型 | **接手开发者 / 新 AI 会话** |
-| [`docs/API.md`](docs/API.md) | 完整接口文档(13 章) | 调用 API 的人 |
-| **[`docs/MCU-INTERFACE.md`](docs/MCU-INTERFACE.md)** | **底盘 MCU 接口**:链路/指令/11B 帧/解析/安全/验收用例 | **嵌入式同事** |
-
-## 接口文档
-
-完整 API 文档见 **[`docs/API.md`](docs/API.md)**,包含:
-
-- 协议线格式(VEL/STOP/SET/TEL)与定点换算
-- `Protocol` / `ChassisLink` / `SerialBackend` / `BLEBackend` / `App` 全部 API
-- 配置项速查表、异常说明、典型示例
-- **只下发模式(不接收回传)的支持情况与限制**
-
-MCU 侧(firmware)接口见 **[`docs/MCU-INTERFACE.md`](docs/MCU-INTERFACE.md)**:接线、指令解析、
-`SET` 缩放、11B 轮速帧、看门狗与验收用例。
-
-## 代码结构
-
-```
-src/ble_chassis_control/
-├── config.py          # 链路选择 / 串口参数 / SET 缩放表 / 地址 / UUID / 超时重试 / UI 范围
-├── protocol.py        # 协议 + StreamDemux:VEL 编码 / TEL / 二进制帧(CRC8/seq 丢帧统计)
-├── motion.py          # 定频运动下发:θ(t)=θ₀+SIGN·∫ω·dt(SIGN=-1 世界系定向)
-├── chart.py           # 四轮转速实时曲线(纯 Canvas,环形缓冲 + 节流重绘)
-├── link.py            # 链路抽象基类 ChassisLink(统一 BLE 与串口的接口)
-├── backend.py         # BLE 后端(Bleak):扫描→连接→UUID 自动解析→收发
-├── backend_serial.py  # 串口后端(pyserial):HC-05/06 / USB-TTL,读线程+自动重连
-├── logging_setup.py   # 滚动文件日志(本地日志目录)
-├── frontend.py        # 控制器:连接/运动/日志/状态(事件与异步)
-├── ui/
-│   ├── theme.py       # sv-ttk 主题 / DPI / 字体 / Palette
-│   ├── layout.py      # 纯控件构建(视图层,不处理业务)
-│   ├── chart_window.py# 独立放大的曲线窗口
-│   ├── settings_window.py # 字体设置窗口
-│   └── extensions.py  # 辅助执行器控制面板
-└── __main__.py        # python -m 入口
-```
-
-**架构要点**:视图(`ui/layout.py`)、主题(`ui/theme.py`)、控制器(`frontend.py`)、链路抽象(`ChassisLink`)分层;换链路(串口 ↔ BLE)或换模块只需增删一个后端实现,**前端零修改**;换底盘类型只需改 MCU 逆解,**协议与上位机零修改**。
-
-## BLE 连接诊断结论(实测,2025-10)
-
-当前卡点:GATT 服务枚举超时(`TimeoutError`)。已在本机通过多组探针复现并排除/确认:
-
-| 探针 | 结果 | 结论 |
-| :--- | :--- | :--- |
-| 扫描 | 正常,RSSI -26 | 模块广播正常 |
-| 广播包 | service_uuids=[FFE0, FEE7],地址类型= public(0) | 协议 UUID 已确认;模块按 public 广播 |
-| 连接(默认/UNCACHED/public) | 链路连上,GATT 枚举 >30s 超时 | 非缓存、非地址类型、非超时参数问题 |
-| 显式 random 地址 | 设备找不到 | 确认 Windows 按 public 缓存 |
-| 连接前配对 | `Could not pair: FAILED` | 模块不响应安全握手 |
-| 重试 3 次 × 40s | 全部同样超时 | **稳定复现,非 Windows 偶发** |
-| 定向拉取 FFE0 / FEE7 服务 | 全部超时 | Windows 另一条 GATT 查询路径同样挂起 |
-| 读 Windows 已有缓存(CACHED) | 超时 | Windows 端无历史 GATT 缓存 |
-| 单次等待 90s | 超时 | 不是模块响应慢,是**完全不应答** |
-| **裸 WinRT 调用(绕开 Bleak/GattSession)** | 全量默认 / UNCACHED / 定向 FFE0,均 >25s 超时;且 `connection_status=0` | **连系统 API 层都不应答 —— 证据链闭环,确证模块侧无 GATT 会话** |
-| **广播类型诊断(不连接)** | `CONNECTABLE_UNDIRECTED` + `GENERAL_DISCOVERABLE`,应答扫描请求 | 模块固件层面**声明可连接且存活**;排除"不可连接广播";指向:连接唤醒固件握手未完成 或 被其他主设备占用 |
-| **对照实验(同机其他 BLE 设备)** | DARKRIM SHADOW 连接成功、GATT 枚举成功(1800/AE00 两服务、read/write/notify);iKF 耳机超时(配对前闸住属正常) | **PC 蓝牙栈(Realtek+WinRT+bleak)完全健康 —— 问题 100% 在 JDY-23 模块侧** |
-| **手机 LightBlue 交叉验证** | 手机可连、可见 FFE0/FFE1、串口→BLE 透传双向通、+CONN/+DISC 事件正常 | **模块 GATT 与透传功能完好** —— 问题精确锁定在"Windows ↔ JDY-23(V81-02 固件)配对/安全层不兼容" |
-| **Windows 系统级手动配对** | 配对失败;固件无 AT+TYPE/AT+PASS 开关;注册表无缓存残留;社区无已知解 | **结论:JDY-23 V81-02 与 Windows 蓝牙栈不兼容,无软件修复路径 → 替换主机(USB 蓝牙)或替换模块(HM-10/正片 nRF52)** |
-
-**结论:链路层能连、广播正常,但所有 GATT 查询(全量/定向/缓存/90s 长等)全部无应答、配对被拒 —— 模块当前没有在维护一个可用的 GATT 会话**,指向模块侧,最可能是:
-
-1. **模块正被其他设备占用**(JDY-23 仅支持单连接):手机上的透传 App / 微信小程序还连着模块时,新连接能建立但 GATT 请求无人应答;
-2. **模块处于低功耗休眠**:`AT+STARTEN 0`(上电休眠)时可能只广播不完整应答 GATT;
-3. 蓝牙适配器/驱动异常(较小概率,因扫描与链路均正常)。
-
-## 根因线索:JDY-23 休眠模式(数据手册 3.3 节)
-
-手册原文要点(实测症状完全吻合):
-
-| 模式 | 行为 | 与实测的对应 |
-| :--- | :--- | :--- |
-| `AT+STARTEN 1` 上电唤醒 | 上电即正常广播,可被连接;可用 `AT+SLEEP` 主动休眠 | — |
-| `AT+STARTEN 0` 上电休眠 | 功耗极低,广播电流最低 3µA,**休眠中仍广播但**;PWRC 引脚低电平唤醒;唤醒后若 `1 秒内` 串口无数据且未被连接,自动再次休眠(已连接则保持唤醒) | 广播正常、连接后 GATT 无应答、`connection_status=0`、配对被拒 |
-
-**结论:若模块当前为 `AT+STARTEN 0`(上电休眠),则会"广播但不服务连接"——这正是本机 3 轮探针的全部症状。**
-
-### 修复步骤(USB-TTL,AT 命令以 `\r\n` 结尾)
-
-1. `AT+STARTEN?` → 若返回 `0`,执行 `AT+STARTEN1`(改为上电唤醒,**参数断电保存**);
-2. `AT+HOSTEN?` → 确认从机模式(非 iBeacon,BLE 从机应返回 `0` 或对应参数);
-3. 模块断电重新上电,等待 10s;
-4. 重跑 `uv run python tools/ble_probe4.py` 验证 GATT 枚举。
-
-> 备选(不改配置):给 PWRC 引脚一个低电平脉冲唤醒后,**立即**发起连接(唤醒后 1s 内未连接会再睡)。
-
-## 现场排查清单(按顺序)
-
-> JDY-23 的 AT 指令经 USB-TTL 发送,**必须以 `\r\n` 结尾**;模块仅在未连接时响应 AT。
-
-1. **关闭手机上所有连接该模块的 App / 小程序**(JDY-23 只支持单连接,被占用时新连接能建立但 GATT 无人应答),必要时开飞行模式再关;
-2. USB-TTL 联机执行 AT 查询(每条回车换行):
-
-   | 指令 | 期望 | 含义 |
-   | :--- | :--- | :--- |
-   | `AT+STAT` | 返回未连接参数 | 确认无其他主设备占用 |
-   | `AT+STARTEN?` | 建议为 `1` | `1`=上电唤醒,`0`=上电休眠(休眠时广播正常但 GATT 可能不应答) |
-   | `AT+HOSTEN?` | 从机(=0 或对应透传从机模式) | 若为 iBeacon 模式则根本没有 GATT 服务 |
-   | `AT+VER` | 记录固件版本 | 排查固件问题用 |
-
-3. **模块重新上电**,等待 5~10s 再连接(排除休眠/僵尸链路);
-4. 用手机 nRF Connect 连接模块做对照:若能枚举出 FFE0/FFE1 服务 → 问题在 Windows 蓝牙栈,执行第 5/6 步;若手机也超时 → 问题在模块/固件/iBeacon 模式;
-5. 设备管理器 → 蓝牙适配器(Realtek `USB\VID_0489&PID_E122`)→ **禁用再启用**(需要管理员权限,脚本无法代做);
-6. 重启电脑;
-7. 仍失败:考虑模块固件版本(AT+VER),联系供应商。
-
-连接成功后,主程序会自动完成:GATT 服务树展示 → FFE1 写入/订阅 → MOT/STOP/SET 控制 → TEL 回传结构化显示。
-
-### 诊断脚本(仓库根目录)
+## 4. 快速开始
 
 ```powershell
-uv run python tools/test_scan_ble.py     # 扫描
-uv run python tools/verify_serial.py     # 串口链路验证(HC-05/USB-TTL):打开→发指令→收数据
-uv run python tools/verify_link.py       # BLE 全链路验证:扫描→连接→GATT→写 FFE1→收通知
-uv run python tools/ble_probe3.py        # 广播包分析 + 重试连接
-uv run python tools/ble_diag2.py         # 多参数组合自动尝试(核查连接)
-uv run python tools/ble_probe4.py        # 定向拉取 GATT 服务(绕行方案核查)
-uv run python tools/ble_probe5.py        # 缓存读取 + 90s 长等(最终核查)
-uv run python tools/ble_probe6.py        # 裸 WinRT 调用,绕开 Bleak(证据链闭环核查)
-uv run python tools/ble_probe7.py        # 广播类型诊断(不连接判断模块可否被连)
-uv run python tools/ble_probe8.py        # 快速连发连接(唤醒固件尝试)
-uv run python tools/ble_probe9.py        # 对照实验:同机其他 BLE 设备(PC 栈健康性判定)
-uv run python tools/ble_probe10.py       # 热连接:捕获广播瞬间立即连(排除时序窗口问题)
-uv run python tools/ble_probe11.py       # GATT 冲刷:8 次短会话密集枚举(排除偶发可用)
-uv run python tools/ble_probe12.py       # 同会话内 4 次反复枚举(排除会话内重试路径)
-uv run python tests/test_smoke.py        # 协议/后端/GUI 冒烟(不连硬件)
-uv run python tests/test_gui_flow.py     # GUI 功能测试:模拟后端 18 条路径(含 SET/运动/放大/字体/曲线/辅助执行器)
-uv run python tests/test_motion.py       # MotionRunner 测试:θ 累积/世界系定向/定频(10 项)
-uv run python tests/test_wheel_frame.py  # 四轮速度帧:CRC/丢帧/回绕/混流(14 项)
-uv run python tests/test_chart.py        # 曲线图:环形缓冲/量程/绘制(7 项)
-uv run python tests/test_serial_backend.py  # 串口后端功能测试(9 项,含探测/写超时/重连/只下发)
-
-# --- lint / format(ruff 已在 dev 依赖中)---
-uv run ruff check src tests tools
-uv run ruff format --check src tests tools
+uv sync
+uv run ble-chassis-control
 ```
 
-## 参考资料
+界面步骤：
 
-- [JDY-23 官方数据手册 (V2.1 PDF)](https://cxemka.com/upload/art/jdy23/f/JDY-23-V2.1_BLE_5.0_Datasheet.pdf)
-- [Bleak 文档](https://bleak.readthedocs.io/)
+1. 选择“串口 (HC-05)”；
+2. COM 下拉选择或手填口号；
+3. 点“连接”；
+4. 调速度/方向/自转，点“发送一次”；急停按 `Esc`；
+5. 四轮反馈出现后，曲线自动刷新；可“放大”或“导出 CSV”。
+
+环境、测试、调试与当前任务见本地开发文档 `docs/dev.md`（本机，未跟踪）。
+
+## 5. 当前状态
+
+| 模块 | 状态 | 说明 |
+| :--- | :--- | :--- |
+| 文本协议 / 11B 帧 | ✅ | 编解码与 CRC/seq 测试通过 |
+| 串口链路 | ✅ | HC-05 真机验证 |
+| BLE 链路 | ⚠️ | 代码完成；本机 JDY-23 不兼容 |
+| 运动下发 | ✅ | 定频 θ 积分；`test_motion` 9/10 |
+| 四轮曲线 | ✅ | 共享数据、暂停、时间轴、CSV、放大 |
+| 字体/主题 | ✅ | 亮/暗、可调字体、持久化 |
+| 辅助执行器 | 🚧 | 上位机控件与协议完成，等待 MCU 联调 |
+| 文件日志 | ✅ | 滚动日志 + 目录入口 |
+
+测试基线：
+
+```text
+test_smoke / wheel / chart / serial / gui  -> 通过
+test_gui_flow                              -> 18 条路径
+test_motion                                -> 9/10（50Hz 实测约 32Hz）
+```
+
+## 6. 目录
+
+```text
+ble-chassis-control/
+├── README.md
+├── pyproject.toml / uv.lock
+├── src/ble_chassis_control/
+│   ├── config.py
+│   ├── protocol.py
+│   ├── motion.py
+│   ├── link.py
+│   ├── backend.py
+│   ├── backend_serial.py
+│   ├── chart.py
+│   ├── frontend.py
+│   ├── logging_setup.py
+│   └── ui/
+│       ├── theme.py
+│       ├── layout.py
+│       ├── chart_window.py
+│       ├── settings_window.py
+│       └── extensions.py
+├── spec/
+│   ├── API.md
+│   └── MCU-INTERFACE.md
+├── tests/
+└── tools/
+```
+
+## 7. 文档
+
+| 文档 | 内容 | 跟踪 |
+| :--- | :--- | :--- |
+| `README.md` | 项目介绍、架构、接线、快速开始、当前状态 | 显式 |
+| [spec/API.md](spec/API.md) | PC 侧 API、线格式、类参考 | 显式 |
+| [spec/MCU-INTERFACE.md](spec/MCU-INTERFACE.md) | MCU 侧协议、解析、CRC、验收 | 显式 |
+| `docs/dev.md` | 本地环境、命令、调试、当前任务 | 隐式 |
+| `docs/devlog.md` | 开发过程记录 | 隐式 |
+
+> `docs/` 与 `AGENTS.md` 是本机开发资料，不进入版本库；需要跨机器共享时再显式提交。

@@ -452,7 +452,7 @@ runner.stop()                 # 自动发 STOP
 ```
 
 **实测**:1 秒 @20Hz → 20 帧,θ 由 0° 累积到 85.9°(期望 ~90°,差值来自末帧调度余量);
-50Hz 设定在本机 Windows 上约 32Hz(定时粒度所致,见 `docs/DEVELOPMENT.md`)。
+50Hz 设定在本机 Windows 上约 32Hz(定时粒度所致,见 README 的当前状态)。
 
 ### 5.6 模块函数
 
