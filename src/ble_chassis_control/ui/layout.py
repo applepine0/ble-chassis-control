@@ -10,6 +10,7 @@ from tkinter import ttk
 
 from .. import config
 from ..chart import WheelChart
+from .extensions import ExtensionsPanel
 from .theme import (
     FONT_BOLD,
     FONT_CHART,
@@ -258,6 +259,9 @@ def build_main_ui(app) -> None:
     )
     app.btn_raw = ttk.Button(ctrl, text="发送", command=app.on_send_raw)
     app.btn_raw.grid(row=11, column=0, columnspan=3, sticky="ew", pady=8)
+
+    # 辅助执行器(三个模块独立;未启用只影响自己)
+    ExtensionsPanel(ctrl, app).grid(row=12, column=0, columnspan=3, sticky="ew", pady=(2, 0))
     app._update_set_hint()
 
     # 右侧:日志 + 转速曲线

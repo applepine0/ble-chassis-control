@@ -99,9 +99,12 @@ t=1.00s  VEL:500,-900,1571     θ_body=-90°  → 世界系方向仍为 0°
 
 | 指令 | 格式 | 说明 |
 | :--- | :--- | :--- |
-| 急停 | `STOP\n` | 三量归零(短帧,优先响应) |
+| 急停 | `STOP\n` | 三量归零(短帧,优先响应);**仅旧底盘驱动** |
 | 参数设置 | `SET:<名>:<整数>\n` | 按参数缩放,如 `SET:MAX_SPEED:800` |
 | 差速(兼容) | `MOT:<左>,<右>\n` | 百分比 [-100,100] |
+| 升降 | `LIFT:<0..500>\n` | 相对标定零点的目标高度,mm |
+| 辅助轮 | `AUX:1:<0..3600>\n` | 绝对角,0.1° |
+| 气缸 | `CYL:1:<0\|1>\n` | 0=缩回,1=伸出 |
 
 **SET 缩放表(方案 A:线上整数)**:
 
@@ -207,6 +210,15 @@ crc8(b"123456789")                                           # 0xF4(标准向量
 
 **通用约束**:半角 `:` `,`;UTF-8;以 `\n` 分帧。
 
+辅助执行器反馈建议用：
+
+```text
+TEL:LIFT:125,AUX1:450,CYL1:1
+```
+
+- `LIFT` mm；`AUX1` 0.1°；`CYL1` 0/1；
+- 变化上报 + 2~5Hz 慢速刷新，不做高频流。
+
 > 📌 **回传是可选的** —— 详见第九节「只下发模式」。
 
 ---
@@ -231,6 +243,9 @@ Protocol.encode_stop() -> bytes                         # b'STOP\n'
 Protocol.encode_mot(left: float, right: float) -> bytes  # 兼容接口
 Protocol.encode_set(name: str, value: float, scale: int | None = None) -> bytes
 Protocol.encode_raw(text: str) -> bytes                 # 自动补 \n
+Protocol.encode_lift(height_mm: int) -> bytes           # b'LIFT:125\n'
+Protocol.encode_aux(angle_d10: int, module_id=1) -> bytes  # b'AUX:1:450\n'
+Protocol.encode_cyl(state: int, module_id=1) -> bytes      # b'CYL:1:1\n'
 ```
 
 `encode_set` 为方案 A:物理值 × `scale` 四舍五入为整数。`scale=None` 时按
@@ -634,6 +649,7 @@ main()           # 模块级入口(console_scripts 指向)
 | `on_send_set()` / `on_send_raw()` | SET / 手动行(按 `config.SET_PARAMS` 自动缩放) |
 | `on_expand_chart()` | 打开/聚焦独立放大的四轮转速曲线窗口 |
 | `on_font_settings()` | 打开字体/主题设置窗口 |
+| `on_send_lift()` / `on_send_aux()` / `on_send_cyl()` | 辅助执行器独立下发 |
 | `export_chart_csv()` | 选择路径并导出主曲线 CSV |
 | `open_log_dir()` / `open_settings_dir()` | 打开日志/配置目录 |
 | `on_self_check()` | 自检(串口列表 / BLE 扫描) |

@@ -97,6 +97,15 @@ class App(tk.Tk):
     raw_var: tk.StringVar
     btn_raw: ttk.Button
 
+    lift_var: tk.IntVar
+    aux_var: tk.DoubleVar
+    cyl_var: tk.StringVar
+    btn_lift: ttk.Button
+    btn_aux: ttk.Button
+    btn_cyl: ttk.Button
+    ext_status_var: tk.StringVar
+    ext_state: dict[str, float]
+
     log: tk.Text
     autoscroll_var: tk.BooleanVar
     chart: WheelChart
@@ -148,6 +157,7 @@ class App(tk.Tk):
             maxlen=config.CHART_MAXLEN,
             channels=len(config.WHEEL_NAMES),
         )
+        self.ext_state: dict[str, float] = {}
 
         self._build_ui()
         self._fit_initial_window()
@@ -748,6 +758,69 @@ class App(tk.Tk):
         self._submit(self.backend.send_text(text))
 
     # ------------------------------------------------------------------
+    # 辅助执行器(升降 / 辅助轮 / 气缸,彼此独立)
+    # ------------------------------------------------------------------
+    def _send_ext(self, frame: bytes, desc: str) -> None:
+        if not self.backend.is_connected:
+            messagebox.showwarning("未连接", "请先连接底盘", parent=self)
+            return
+        line = frame.decode(config.ENCODING).strip()
+        self.log_tx(f"{line}  ({desc})")
+        self._submit(self.backend.send(frame))
+
+    def on_send_lift(self) -> None:
+        if not config.EXT_MODULES.get("lift"):
+            return
+        try:
+            height = int(round(self.lift_var.get()))
+            frame = Protocol.encode_lift(height)
+        except (tk.TclError, ValueError) as exc:
+            messagebox.showwarning("输入错误", f"升降高度无效:{exc}", parent=self)
+            return
+        self._send_ext(frame, f"升降 {height} mm")
+
+    def on_send_aux(self) -> None:
+        if not config.EXT_MODULES.get("aux"):
+            return
+        try:
+            angle_d10 = int(round(self.aux_var.get() * 10))
+            frame = Protocol.encode_aux(angle_d10)
+        except (tk.TclError, ValueError) as exc:
+            messagebox.showwarning("输入错误", f"辅助轮角度无效:{exc}", parent=self)
+            return
+        self._send_ext(frame, f"辅助轮1 {angle_d10 / 10:.1f}°")
+
+    def on_send_cyl(self) -> None:
+        if not config.EXT_MODULES.get("cyl"):
+            return
+        state = 1 if self.cyl_var.get() == "伸出" else 0
+        try:
+            frame = Protocol.encode_cyl(state)
+        except ValueError as exc:
+            messagebox.showwarning("输入错误", f"气缸状态无效:{exc}", parent=self)
+            return
+        self._send_ext(frame, "气缸1 伸出" if state else "气缸1 缩回")
+
+    def _update_ext_feedback(self, values: dict) -> None:
+        normalized = {str(k).upper(): float(v) for k, v in values.items()}
+        changed = False
+        for key in ("LIFT", "AUX1", "CYL1"):
+            if key in normalized:
+                self.ext_state[key] = normalized[key]
+                changed = True
+        if not changed:
+            return
+        parts: list[str] = []
+        if "LIFT" in self.ext_state:
+            parts.append(f"升降 {self.ext_state['LIFT']:.0f} mm")
+        if "AUX1" in self.ext_state:
+            parts.append(f"辅助轮1 {self.ext_state['AUX1'] / 10:.1f}°")
+        if "CYL1" in self.ext_state:
+            state = "伸出" if self.ext_state["CYL1"] >= 0.5 else "缩回"
+            parts.append(f"气缸1 {state}")
+        self.ext_status_var.set("反馈: " + " | ".join(parts))
+
+    # ------------------------------------------------------------------
     # 后端回调 -> 队列
     # ------------------------------------------------------------------
     def _on_line_cb(self, line: str, parsed: ParsedMessage) -> None:
@@ -793,7 +866,9 @@ class App(tk.Tk):
                 if kind == "line":
                     line, parsed = payload
                     if parsed.kind == "tel":
-                        kv = ", ".join(f"{k}={v:g}" for k, v in parsed.params["values"].items())
+                        values = parsed.params["values"]
+                        self._update_ext_feedback(values)
+                        kv = ", ".join(f"{k}={v:g}" for k, v in values.items())
                         self.log_rx(f"TEL {kv}  |  {line}")
                     elif parsed.kind == "vel":
                         p = parsed.params

@@ -59,6 +59,9 @@ class FakeBackend:
     async def send_text(self, text: str) -> None:
         self.sent.append(text)
 
+    async def send(self, data: bytes) -> None:
+        self.sent.append(data.decode("utf-8").strip())
+
 
 def pump(app, seconds: float = 0.8) -> None:
     """轮询 tk 事件 + 让后台并线程跑,直到队列被消费。"""
@@ -312,6 +315,25 @@ def run() -> None:
         finally:
             csv_path.unlink(missing_ok=True)
         print("17) 曲线暂停/CSV/主题切换: OK")
+
+        # 18) 辅助执行器:三个模块独立下发
+        fake.connected = True
+        app.backend = fake
+        app.lift_var.set(125)
+        app.aux_var.set(45.0)
+        app.cyl_var.set("伸出")
+        app.on_send_lift()
+        app.on_send_aux()
+        app.on_send_cyl()
+        pump(app, 0.4)
+        assert "LIFT:125" in fake.sent, fake.sent
+        assert "AUX:1:450" in fake.sent, fake.sent
+        assert "CYL:1:1" in fake.sent, fake.sent
+        app._update_ext_feedback({"LIFT": 125, "AUX1": 450, "CYL1": 1})
+        assert "125 mm" in app.ext_status_var.get()
+        assert "45.0°" in app.ext_status_var.get()
+        assert "伸出" in app.ext_status_var.get()
+        print("18) 辅助执行器独立下发/反馈: OK")
 
         print("\nGUI 功能测试(模拟链路)全部通过 ✓")
     finally:

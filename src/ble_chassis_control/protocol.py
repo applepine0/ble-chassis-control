@@ -52,6 +52,9 @@ TAG_MOT = "MOT"
 TAG_STOP = "STOP"
 TAG_SET = "SET"
 TAG_TEL = "TEL"
+TAG_LIFT = "LIFT"
+TAG_AUX = "AUX"
+TAG_CYL = "CYL"
 
 # 速度范围(百分比,旧 MOT 接口)
 SPEED_MIN, SPEED_MAX = -100.0, 100.0
@@ -166,6 +169,37 @@ class Protocol:
         if not text.endswith(config.LINE_END):
             text = text + config.LINE_END
         return text.encode(config.ENCODING)
+
+    @staticmethod
+    def encode_lift(height_mm: int) -> bytes:
+        """升降目标高度(mm,相对标定零点)。"""
+        value = int(height_mm)
+        if not config.LIFT_MIN_MM <= value <= config.LIFT_MAX_MM:
+            raise ValueError(
+                f"升降高度越界: {value} mm,允许 {config.LIFT_MIN_MM}..{config.LIFT_MAX_MM}"
+            )
+        return f"{TAG_LIFT}:{value}{config.LINE_END}".encode(config.ENCODING)
+
+    @staticmethod
+    def encode_aux(angle_d10: int, module_id: int = 1) -> bytes:
+        """辅助轮绝对角,单位 0.1°。"""
+        value = int(angle_d10)
+        if not config.AUX_MIN_D10 <= value <= config.AUX_MAX_D10:
+            raise ValueError(
+                f"辅助轮角度越界: {value},允许 {config.AUX_MIN_D10}..{config.AUX_MAX_D10}"
+            )
+        if module_id < 1:
+            raise ValueError(f"辅助轮编号非法: {module_id}")
+        return f"{TAG_AUX}:{module_id}:{value}{config.LINE_END}".encode(config.ENCODING)
+
+    @staticmethod
+    def encode_cyl(state: int, module_id: int = 1) -> bytes:
+        """气缸目标状态:0=缩回,1=伸出。"""
+        if state not in (0, 1):
+            raise ValueError(f"气缸状态非法: {state!r},只允许 0/1")
+        if module_id < 1:
+            raise ValueError(f"气缸编号非法: {module_id}")
+        return f"{TAG_CYL}:{module_id}:{state}{config.LINE_END}".encode(config.ENCODING)
 
     # ------------------------------------------------------------------
     # 解析(MCU -> PC)

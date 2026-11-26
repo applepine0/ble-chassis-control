@@ -50,6 +50,9 @@ def test_protocol() -> None:
     assert Protocol.encode_set("CUSTOM", 3) == b"SET:CUSTOM:3\n"
     assert Protocol.encode_raw("hi") == b"hi\n"
     assert Protocol.encode_raw("hi\n") == b"hi\n"
+    assert Protocol.encode_lift(125) == b"LIFT:125\n"
+    assert Protocol.encode_aux(450) == b"AUX:1:450\n"
+    assert Protocol.encode_cyl(1) == b"CYL:1:1\n"
 
     p = Protocol.parse_line("MOT:100,-100")
     assert p.kind == "mot" and p.params == {"left": 100.0, "right": -100.0}, p
