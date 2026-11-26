@@ -3,19 +3,17 @@
 目的:区分「模块问题」还是「PC 蓝牙栈问题」。
   任一对照设备 GATT 枚举成功  => PC 栈健康,JDY-23 模块 100% 有恙;
   全部设备同样超时            => Realtek BLE 栈系统性问题,模块可能无辜。
+
+用法:
+  uv run python tools/ble_probe9.py <MAC1> [<MAC2> ...]
+不内置任何设备地址。
 """
 
 import asyncio
+import sys
 import traceback
 
 from bleak import BleakClient, BleakScanner
-
-# 从近期扫描中挑出的可连接设备(可能需配对,仅作定性判断)
-TARGETS = [
-    ("Bass W04 音箱", "41:BB:01:02:63:AD"),
-    ("iKF-T1 耳机", "13:82:D2:56:B3:96"),
-    ("DARKRIM SHADOW", "B9:60:72:A3:E6:05"),
-]
 
 
 async def try_device(label: str, address: str) -> None:
@@ -48,10 +46,13 @@ async def try_device(label: str, address: str) -> None:
 
 
 async def main() -> None:
-    # 仅聚焦已确证可连接的 DARKRIM SHADOW,并重试 Bass W04
-    await try_device("DARKRIM SHADOW(复核)", "B9:60:72:A3:E6:05")
-    await asyncio.sleep(2)
-    await try_device("Bass W04 音箱(重试)", "41:BB:01:02:63:AD")
+    targets = sys.argv[1:]
+    if not targets:
+        print("用法: uv run python tools/ble_probe9.py <MAC1> [<MAC2> ...]")
+        return
+    for i, address in enumerate(targets, 1):
+        await try_device(f"target-{i}", address.upper())
+        await asyncio.sleep(1)
     print("\n==> 对照结论:见上方逐台结果。若对照设备可枚举而 JDY-23 不能,则 PC 栈健康、模块有恙。")
 
 

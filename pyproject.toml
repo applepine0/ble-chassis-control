@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "底盘上位机:HC-05 串口 / BLE 双链路,控制指令下发与数据回传显示"
 readme = "README.md"
 authors = [
-    { name = "applepine0", email = "mmygtxdt1@163.com" }
+    { name = "applepine0", email = "applepine0@users.noreply.github.com" }
 ]
 requires-python = ">=3.13"
 dependencies = [

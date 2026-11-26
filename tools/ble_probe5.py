@@ -1,11 +1,15 @@
 """探针 5: 最后两个旁路尝试 —— ① 读 Windows 已有 GATT 缓存(免射频交互)② 单次 90s 超长等待。"""
 
 import asyncio
+import os
 import traceback
 
 from bleak import BleakClient, BleakScanner
 
-ADDRESS = "7B:B7:05:04:23:A2"
+ADDRESS = os.getenv("CHASSIS_BLE_ADDRESS", "").strip().upper()
+
+if not ADDRESS:
+    raise SystemExit("请设置 CHASSIS_BLE_ADDRESS 环境变量或传入模块 MAC")
 
 
 async def try_once(label: str, timeout: float, winrt: dict) -> None:

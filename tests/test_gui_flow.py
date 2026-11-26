@@ -18,7 +18,7 @@ class FakeBackend:
     """模拟 BLEBackend 的异步接口。"""
 
     def __init__(self) -> None:
-        self.address = "7B:B7:05:04:23:A2"
+        self.address = "00:11:22:33:44:55"
         self.port = ""
         self.baudrate = 9600
         self.mtu = 23

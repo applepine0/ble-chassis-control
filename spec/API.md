@@ -586,7 +586,7 @@ BLEBackend(address: str | None = None, *, on_line=None, on_state=None)
 
 | 成员 | 说明 |
 | :--- | :--- |
-| `address` | 模块 MAC(默认 `config.DEVICE_ADDRESS`) |
+| `address` | 模块 MAC;默认取环境变量 `CHASSIS_BLE_ADDRESS`,未设置时需界面输入 |
 | `write_uuid` / `notify_uuid` | 自动解析结果 |
 | `kind` | `"ble"` |
 

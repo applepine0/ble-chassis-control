@@ -20,6 +20,9 @@ from ble_chassis_control.protocol import Protocol
 
 ADDRESS = config.DEVICE_ADDRESS
 
+if not ADDRESS:
+    raise SystemExit("请设置 CHASSIS_BLE_ADDRESS 环境变量或传入模块 MAC")
+
 
 async def main() -> None:
     device = await BleakScanner.find_device_by_address(ADDRESS, timeout=10.0)

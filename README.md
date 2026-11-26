@@ -82,7 +82,7 @@ MCU → PC:
 | :--- | :--- |
 | 主链路 | HC-05/06 配对后生成虚拟 COM 口；模块与 MCU 均 `115200` |
 | 串口独占 | 连接时关闭 VOFA+、串口助手、Arduino IDE 等占用程序 |
-| BLE 模块 | 广播 FFE0，透传 FFE1（write + notify）；备选 NUS |
+| BLE 模块 | 广播 FFE0，透传 FFE1（write + notify）；备选 NUS；目标 MAC 用 `CHASSIS_BLE_ADDRESS` 或界面输入 |
 | 供电/电平 | 模块与 MCU 共地，TX/RX 交叉，电平匹配 |
 | 安全 | `STOP` 只停底盘；升降/辅助轮/气缸由各自控制，整机急停未实现 |
 

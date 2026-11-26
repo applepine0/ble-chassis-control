@@ -1,12 +1,16 @@
 """诊断:JDY-23 连接 + 服务枚举(推荐写法:扫描拿 BLEDevice 对象再连接)。"""
 
 import asyncio
+import os
 import sys
 import traceback
 
 from bleak import BleakClient, BleakScanner
 
-ADDRESS = "7B:B7:05:04:23:A2"
+ADDRESS = os.getenv("CHASSIS_BLE_ADDRESS", "").strip().upper()
+
+if not ADDRESS:
+    raise SystemExit("请设置 CHASSIS_BLE_ADDRESS 环境变量或传入模块 MAC")
 
 
 async def main() -> None:

@@ -1,11 +1,15 @@
 """探针 4: 定向拉取 GATT 服务(services=[FFE0]),绕过全量枚举挂起问题。"""
 
 import asyncio
+import os
 import traceback
 
 from bleak import BleakClient, BleakScanner
 
-ADDRESS = "7B:B7:05:04:23:A2"
+ADDRESS = os.getenv("CHASSIS_BLE_ADDRESS", "").strip().upper()
+
+if not ADDRESS:
+    raise SystemExit("请设置 CHASSIS_BLE_ADDRESS 环境变量或传入模块 MAC")
 FFE0 = "0000ffe0-0000-1000-8000-00805f9b34fb"
 FEE7 = "0000fee7-0000-1000-8000-00805f9b34fb"
 

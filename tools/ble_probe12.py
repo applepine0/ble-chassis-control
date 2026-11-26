@@ -6,12 +6,16 @@
 """
 
 import asyncio
+import os
 import traceback
 
 from bleak.backends.winrt.client import FutureLike, _address_to_int
 from winrt.windows.devices.bluetooth import BluetoothCacheMode, BluetoothLEDevice
 
-ADDRESS = "7B:B7:05:04:23:A2"
+ADDRESS = os.getenv("CHASSIS_BLE_ADDRESS", "").strip().upper()
+
+if not ADDRESS:
+    raise SystemExit("请设置 CHASSIS_BLE_ADDRESS 环境变量或传入模块 MAC")
 
 
 async def main() -> None:

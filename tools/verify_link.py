@@ -23,6 +23,9 @@ from ble_chassis_control.protocol import Protocol
 
 ADDRESS = (sys.argv[1] if len(sys.argv) > 1 else config.DEVICE_ADDRESS).upper()
 
+if not ADDRESS:
+    raise SystemExit("请设置 CHASSIS_BLE_ADDRESS 环境变量或传入模块 MAC")
+
 
 async def main() -> None:
     print(f"==> 1) 扫描 {ADDRESS} ...", flush=True)

@@ -502,6 +502,13 @@ class App(tk.Tk):
         self._reconnecting = False
         value = self.addr_var.get().strip()
         if self.link_kind.get() == "ble":
+            if not value:
+                messagebox.showwarning(
+                    "输入错误",
+                    "BLE 模式需要模块 MAC:可直接输入,或设置环境变量 CHASSIS_BLE_ADDRESS",
+                    parent=self,
+                )
+                return
             self.backend.address = value.upper()  # type: ignore[attr-defined]
         else:
             self.backend.port = value  # type: ignore[attr-defined]

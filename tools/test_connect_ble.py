@@ -1,8 +1,12 @@
 import asyncio
+import os
 
 from bleak import BleakClient
 
-ADDRESS = "7B:B7:05:04:23:A2"
+ADDRESS = os.getenv("CHASSIS_BLE_ADDRESS", "").strip().upper()
+
+if not ADDRESS:
+    raise SystemExit("请设置 CHASSIS_BLE_ADDRESS 环境变量或传入模块 MAC")
 
 
 async def main():
